@@ -1,7 +1,9 @@
 services:
   frontend:
     container_name: dt-slurm-proxy
-    build: .
+    build:
+      context: ../
+      dockerfile: ./docker/Dockerfile
     volumes:
       - /Users/areynolds/.ssh:/Users/areynolds/.ssh:ro
     ports:

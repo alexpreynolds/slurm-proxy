@@ -1,6 +1,6 @@
 FROM python:3.9-alpine
 
-COPY ./requirements.txt /app/requirements.txt
+COPY ../requirements.txt /app/requirements.txt
 
 WORKDIR /app
 
@@ -16,17 +16,17 @@ RUN pip install -r requirements.txt
 
 RUN rm -r /root/.cache
 
-COPY nginx.conf /etc/nginx/
-COPY flask-site-nginx.conf /etc/nginx/conf.d/
-COPY uwsgi.ini /etc/uwsgi/
-COPY supervisord.conf /etc/
+COPY ../docker/nginx.conf /etc/nginx/
+COPY ../docker/flask-site-nginx.conf /etc/nginx/conf.d/
+COPY ../docker/uwsgi.ini /etc/uwsgi/
+COPY ../docker/supervisord.conf /etc/
 
 RUN mkdir -p /data/db && \
     chown -R mongodb /data/db
 VOLUME /data/db
 EXPOSE 27017
 
-COPY app app
-COPY wsgi.py wsgi.py
+COPY ../app app
+COPY ../docker/wsgi.py wsgi.py
 
 CMD ["/usr/bin/supervisord"]

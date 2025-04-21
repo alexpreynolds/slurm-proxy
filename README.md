@@ -18,7 +18,7 @@ python run.py
 For forwarding SSH key data on macOS:
 
 ```
-docker image build -t dt-slurm-proxy-docker .
+docker image build -t dt-slurm-proxy-docker --build-context parent=../ .
 CONTAINER_ID=$(docker run -p 5001:5001 --mount type=bind,source=/Users/areynolds,target=/Users/areynolds,readonly -d dt-slurm-proxy-docker)
 docker logs --follow ${CONTAINER_ID}
 ```

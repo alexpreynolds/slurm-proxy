@@ -26,6 +26,7 @@ RUN mkdir -p /data/db && \
 VOLUME /data/db
 EXPOSE 27017
 
-COPY *.py *.sh /app/
+COPY app app
+COPY wsgi.py wsgi.py
 
 CMD ["/usr/bin/supervisord"]

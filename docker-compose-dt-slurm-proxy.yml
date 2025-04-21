@@ -1,0 +1,8 @@
+services:
+  frontend:
+    container_name: dt-slurm-proxy
+    build: .
+    volumes:
+      - /Users/areynolds/.ssh:/Users/areynolds/.ssh:ro
+    ports:
+      - "5001:5001"

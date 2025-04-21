@@ -441,7 +441,7 @@ def poll_slurm_jobs() -> None:
     the job status if there are any changes. If a job is marked as finished, a state
     change event is triggered.
     """
-    # print(" * Polling SLURM jobs...", file=sys.stderr)
+    print(" * Polling SLURM jobs...", file=sys.stderr)
     try:
         jobs_coll = MONGODB_JOBS_COLLECTION
         jobs = jobs_coll.find()

@@ -8,7 +8,6 @@ from app.task_monitoring import task_monitoring, poll_slurm_jobs
 from app.task_slurm_rest import task_slurm_rest
 from app.constants import (
     APP_NAME,
-    APP_PORT,
     MONITOR_POLLING_INTERVAL,
 )
 from app.helpers import (
@@ -24,15 +23,16 @@ def create_app():
     @app.route("/ping")
     def ping():
         return "pong"
-
-    print(f" * Starting {APP_NAME} on port {APP_PORT}")
-    init_mongodb()
-    scheduler = BackgroundScheduler()
-    poll_scheduler = scheduler.add_job(
-        poll_slurm_jobs,
-        "interval",
-        minutes=int(MONITOR_POLLING_INTERVAL),
-    )
-    scheduler.start()
+    
+    with app.app_context():
+        init_mongodb()
+        scheduler = BackgroundScheduler()
+        poll_scheduler = scheduler.add_job(
+            poll_slurm_jobs,
+            "interval",
+            minutes=int(MONITOR_POLLING_INTERVAL),
+            id="poll_slurm_jobs",
+        )
+        scheduler.start()
 
     return app

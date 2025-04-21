@@ -23,6 +23,15 @@ CONTAINER_ID=$(docker run -p 5001:5001 --mount type=bind,source=/Users/areynolds
 docker logs --follow ${CONTAINER_ID}
 ```
 
+Or via Docker compose:
+
+```
+docker compose -f docker-compose-dt-slurm-proxy.yml build
+docker compose -f docker-compose-dt-slurm-proxy.yml up
+...
+docker compose -f docker-compose-dt-slurm-proxy.yml down
+```
+
 ## "Hello, world!" test request
 
 ```

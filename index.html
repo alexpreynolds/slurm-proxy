@@ -1,0 +1,24 @@
+{
+    "dirs": {
+        "error": "/home/areynolds/dt-slurm-proxy/error",
+        "input": "/home/areynolds/dt-slurm-proxy/input",
+        "output": "/home/areynolds/dt-slurm-proxy/output"
+    },
+    "name": "hello_world",
+    "params": [
+        "-e",
+        "\"hello, world!\t(sent to $USER)\""
+    ],
+    "slurm": {
+        "cpus_per_task": 1,
+        "error": "dt-slurm-proxy.hello_world.error.txt",
+        "job_name": "dt-slurm-proxy.hello_world",
+        "mem": "1G",
+        "nodes": 1,
+        "ntasks_per_node": 1,
+        "output": "dt-slurm-proxy.hello_world.output.txt",
+        "partition": "queue1",
+        "time": "00:30:00"
+    },
+    "uuid": "123e4567-e89b-12d3-a456-426614174000"
+}

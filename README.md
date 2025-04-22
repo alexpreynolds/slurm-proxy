@@ -4,13 +4,24 @@ This Flask application provides endpoints for submitting and monitoring
 jobs sent to a SLURM scheduler, for the purpose of integration with a
 defined set of CLI tools.
 
+<img width="828" alt="dt-slurm-proxy layout" src="https://github.com/user-attachments/assets/2fd66c7e-0fc1-4d7d-bc32-e3fd2d01a62c" />
+
 ## Python
+
+For testing locally:
 
 ```
 virtualenv --python=python3.9 .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python run.py
+```
+
+If the following error occurs or similar, start the local MongoDB service before starting the Flask application:
+
+```
+ * MongoDB connection failed - is the server running?
+Error: localhost:27017: [Errno 61] Connection refused (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms), Timeout: 1.0s, Topology Description: <TopologyDescription id: 6807f7620a450d28e1335f35, topology_type: Unknown, servers: [<ServerDescription ('localhost', 27017) server_type: Unknown, rtt: None, error=AutoReconnect('localhost:27017: [Errno 61] Connection refused (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
 ```
 
 ## Docker container

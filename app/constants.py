@@ -71,6 +71,8 @@ class TaskCommunicationMethods(Enum):
     SSH = 1
     REST = 2
 
+SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION = os.environ.get("SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION", "0.0.42")
+SLURM_REST_URL = os.environ.get("SLURM_REST_URL", f"http://login-pvm02:6820/slurm/v{SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION}")
 
 """
 RabbitMQ connection parameters

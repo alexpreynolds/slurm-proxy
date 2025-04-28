@@ -45,14 +45,14 @@ def ssh_client_exec(ssh_client: paramiko.SSHClient, cmd: str) -> tuple:
     from app.constants import (
         SSH_HOSTNAME,
         SSH_USERNAME,
-        SSH_KEY,
+        SSH_PRIVATE_KEY,
     )
 
     try:
         ssh_client.connect(
             hostname=SSH_HOSTNAME,
             username=SSH_USERNAME,
-            pkey=SSH_KEY,
+            pkey=SSH_PRIVATE_KEY,
             look_for_keys=False,
             allow_agent=False,
             timeout=10,

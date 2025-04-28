@@ -71,9 +71,6 @@ class TaskCommunicationMethods(Enum):
     SSH = 1
     REST = 2
 
-SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION = os.environ.get("SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION", "0.0.42")
-SLURM_REST_URL = os.environ.get("SLURM_REST_URL", f"http://login-pvm02:6820/slurm/v{SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION}")
-
 """
 RabbitMQ connection parameters
 
@@ -121,13 +118,13 @@ used to authenticate the connection. The `SSH_USERNAME` is the username used to 
 to the SLURM scheduler, and the `SSH_HOSTNAME` is the hostname of the SLURM scheduler.
 """
 SSH_USERNAME = os.environ.get("SSH_USERNAME", "areynolds")
-SSH_HOSTNAME = os.environ.get("SSH_HOSTNAME", "tools0.altiusinstitute.org")
+SSH_HOSTNAME = os.environ.get("SSH_HOSTNAME", "login.altius.org")
 SSH_PRIVATE_KEY_PATH = os.path.expanduser(f"/Users/{SSH_USERNAME}/.ssh/id_ed25519")
 try:
-    SSH_KEY = paramiko.Ed25519Key.from_private_key_file(SSH_PRIVATE_KEY_PATH)
+    SSH_PRIVATE_KEY = paramiko.Ed25519Key.from_private_key_file(SSH_PRIVATE_KEY_PATH)
 except FileNotFoundError as err:
     print(f" * SSH key not found: {err}", file=sys.stderr)
-    SSH_KEY = None
+    SSH_PRIVATE_KEY = None
 
 """
 Mongodb connection
@@ -261,3 +258,15 @@ SLURM_STATE = {
 }
 SLURM_STATE_UNKNOWN = "UNKNOWN"
 SLURM_STATE_END_STATES = ["COMPLETED", "FAILED", "CANCELLED", "SUSPENDED", "NODE_FAIL", "TIMEOUT", "DEADLINE"]
+
+"""
+SLURM REST API parameters
+ref. https://slurm.schedmd.com/rest_api.html
+"""
+
+SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION = os.environ.get("SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION", "0.0.42")
+SLURM_REST_HOST = os.environ.get("SLURM_REST_HOST", "https://slurmapi.altius.org")
+SLURM_REST_SLURM_ENDPOINT_URL = os.environ.get("SLURM_REST_URL", f"{SLURM_REST_HOST}/slurm/v{SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION}")
+SLURM_REST_SLURMDB_ENDPOINT_URL = os.environ.get("SLURM_REST_URL", f"{SLURM_REST_HOST}/slurmdb/v{SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION}")
+SLURM_REST_JWT_EXPIRATION_TIME = os.environ.get("SLURM_REST_JWT_EXPIRATION_TIME", 30)
+SLURM_REST_GENERIC_USERNAME = "generic_user"

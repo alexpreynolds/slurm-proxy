@@ -10,6 +10,9 @@ RUN apk add --update --no-cache --virtual .tmp-build-deps \
     gcc libc-dev linux-headers postgresql-dev mongodb mongodb-tools openssh \
     nginx supervisor && apk add libffi-dev
 
+# Install WireGuard and iptables
+RUN apk add --no-cache wireguard-tools iptables ip6tables
+
 RUN pip3 install --upgrade pip
 RUN pip3 install uwsgi
 RUN pip install -r requirements.txt
@@ -26,7 +29,23 @@ RUN mkdir -p /data/db && \
 VOLUME /data/db
 EXPOSE 27017
 
+# Create WireGuard configuration directory
+RUN mkdir -p /etc/wireguard
+
+# Add WireGuard configurations
+COPY ../docker/wireguard-prod.conf /etc/wireguard/prod.conf.template
+COPY ../docker/wireguard-dev.conf /etc/wireguard/dev.conf.template
+
+# Add WireGuard startup script
+COPY ../docker/start_wireguard.sh /app/start_wireguard.sh
+RUN chmod +x /app/start_wireguard.sh
+
 COPY ../app app
 COPY ../docker/wsgi.py wsgi.py
 
+# Use a custom entrypoint to start WireGuard before supervisord
+COPY ../docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/bin/supervisord"]

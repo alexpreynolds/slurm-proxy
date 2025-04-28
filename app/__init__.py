@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import os
+
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -14,7 +16,18 @@ from app.helpers import (
     init_mongodb,
 )
 
-def create_app():    
+def create_app():
+    """
+    If there is a valid key for generating Slurm authentication tokens, 
+    create a Flask application instance and configure it. This function 
+    initializes the Flask application, registers blueprints, and sets up
+    the MongoDB connection. It also initializes the background scheduler
+    for polling SLURM jobs.
+    """
+    slurm_private_key = os.environ.get("SLURM_JWT_HS256_KEY_BASE64")
+    if not slurm_private_key:
+        raise ValueError("SLURM_JWT_HS256_KEY_BASE64 environment variable not set")
+
     app = Flask(APP_NAME)
     app.register_blueprint(task_submission, url_prefix="/submit")
     app.register_blueprint(task_monitoring, url_prefix="/monitor")

@@ -346,6 +346,7 @@ def get_current_slurm_job_metadata_by_slurm_job_id(slurm_job_id: int) -> dict:
     # test case
     if slurm_job_id == SLURM_TEST_JOB_ID:
         return SLURM_TEST_JOB_STATUS
+    # SSH command to get the job status
     cmd = " ".join(
         [
             str(x)

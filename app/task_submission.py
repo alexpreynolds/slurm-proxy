@@ -145,6 +145,7 @@ def define_sbatch_cmd_for_task_via_ssh(task: dict) -> str:
     cmd_comps.append(slurm_cmd)
     # construct and return the full set of commands
     cmd = " ; ".join(cmd_comps)
+    # print(f" * sbatch command: {cmd}", file=sys.stderr)
     return cmd
 
 

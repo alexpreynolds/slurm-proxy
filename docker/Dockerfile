@@ -11,7 +11,7 @@ RUN apk add --update --no-cache --virtual .tmp-build-deps \
     nginx supervisor && apk add libffi-dev
 
 # Install WireGuard and iptables
-RUN apk add --no-cache wireguard-tools iptables ip6tables
+RUN apk add --no-cache wireguard-tools iptables ip6tables envsubst
 
 RUN pip3 install --upgrade pip
 RUN pip3 install uwsgi

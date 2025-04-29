@@ -45,6 +45,8 @@ class TestTaskSubmission(unittest.TestCase):
                     '"Hello world!\t(sent to $USER)\n"',
                 ],
                 "uuid": "123e4567-e89b-12d3-a456-426614174000",
+                "username": "areynolds",
+                "cwd": "/home/areynolds",
             }
         }
         response = self.client.post("/", json=test_data)

@@ -177,7 +177,11 @@ def monitor_new_slurm_job(job: dict) -> bool:
     Returns:
         bool: True if the job was successfully monitored, False otherwise.
     """
-    slurm_job_id = int(job["slurm_job_id"])
+    try:
+        slurm_job_id = int(job["slurm_job_id"])
+    except TypeError as err:
+        print(f" * Error: {job['slurm_job_id']} {err}", file=sys.stderr)
+        return False
     slurm_job_status_metadata = get_current_slurm_job_metadata_by_slurm_job_id(
         slurm_job_id
     )
@@ -332,8 +336,12 @@ def remove_and_return_job_from_monitor_db_by_slurm_job_id(slurm_job_id: int) -> 
 
 
 def get_current_slurm_job_metadata_by_slurm_job_id(slurm_job_id: int) -> dict:
+    return get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(slurm_job_id)
+
+
+def get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(slurm_job_id: int) -> dict:
     """
-    Get the current SLURM job metadata by job ID.
+    Get the current SLURM job metadata by job ID via SSH.
 
     Args:
         slurm_job_id (int): The SLURM job ID.
@@ -360,26 +368,30 @@ def get_current_slurm_job_metadata_by_slurm_job_id(slurm_job_id: int) -> dict:
             ]
         ]
     )
-    (stdin, stdout, stderr) = ssh_client_exec(SSH_CLIENT, cmd)
-    job_status_str = stdout.read().decode("utf-8").strip()
-    if not job_status_str:
+    try:
+        (stdin, stdout, stderr) = ssh_client_exec(SSH_CLIENT, cmd)
+        job_status_str = stdout.read().decode("utf-8").strip()
+        if not job_status_str:
+            return None
+        job_status_components = job_status_str.split("\n")[0].split("|")
+        job_status_keys = [
+            "job_id",
+            "job_name",
+            "state",
+            "user",
+            "partition",
+            "time",
+            "start",
+            "end",
+            "elapsed",
+        ]
+        job_status = dict(zip(job_status_keys, job_status_components))
+        if job_status["state"] not in SLURM_STATES_ALLOWED:
+            job_status["state"] = SLURM_STATE_UNKNOWN
+        return job_status
+    except TypeError as err:
+        print(f" * Error: {err}", file=sys.stderr)
         return None
-    job_status_components = job_status_str.split("\n")[0].split("|")
-    job_status_keys = [
-        "job_id",
-        "job_name",
-        "state",
-        "user",
-        "partition",
-        "time",
-        "start",
-        "end",
-        "elapsed",
-    ]
-    job_status = dict(zip(job_status_keys, job_status_components))
-    if job_status["state"] not in SLURM_STATES_ALLOWED:
-        job_status["state"] = SLURM_STATE_UNKNOWN
-    return job_status
 
 
 def get_slurm_jobs_metadata_by_slurm_job_state(slurm_job_state: str) -> dict:
@@ -442,7 +454,7 @@ def poll_slurm_jobs() -> None:
     the job status if there are any changes. If a job is marked as finished, a state
     change event is triggered.
     """
-    print(" * Polling SLURM jobs...", file=sys.stderr)
+    # print(" * Polling SLURM jobs...", file=sys.stderr)
     try:
         jobs_coll = MONGODB_JOBS_COLLECTION
         jobs = jobs_coll.find()

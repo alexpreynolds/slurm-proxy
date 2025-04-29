@@ -9,6 +9,7 @@ import requests
 from flask import (
     Blueprint,
     Response,
+    request,
 )
 from app.helpers import (
     ssh_client,
@@ -44,6 +45,7 @@ class QueryParams(TypedDict, total=False):
     partition: str
     state: str
 
+
 task_slurm_rest = Blueprint("task_slurm_rest", __name__)
 
 
@@ -53,10 +55,13 @@ def get_diag() -> Response:
     GET request handler for SLURM diag information.
     This function retrieves the SLURM REST token from the request headers
     and returns it in the response, along with a diagnostic JSON object.
+
+    ref. https://slurm.schedmd.com/rest_api.html#slurmV0042GetDiag (request)
+    ref. https://slurm.schedmd.com/rest_api.html#v0.0.42_openapi_diag_resp (response)
     """
     return run_query(
         username=SLURM_REST_GENERIC_USERNAME,
-        query_functor=query_slurm_endpoint_via_requests,
+        query_functor=query_slurm_get_endpoint_via_requests,
         endpoint_url=SLURM_REST_SLURM_ENDPOINT_URL,
         endpoint_key='diag',
         endpoint_method='GET',
@@ -69,11 +74,14 @@ def get_list_of_jobs() -> Response:
     GET request handler for SLURM jobs information.
     This function retrieves the SLURM REST token from the request headers
     and returns it in the response, along with a list of jobs.
+
+    ref. https://slurm.schedmd.com/rest_api.html#slurmdbV0042GetJobs (request)
+    ref. https://slurm.schedmd.com/rest_api.html#v0.0.42_openapi_slurmdbd_jobs_resp (response)
     """
     return run_query(
         username=SLURM_REST_GENERIC_USERNAME,
-        query_functor=query_slurm_endpoint_via_requests,
-        endpoint_url=SLURM_REST_SLURM_ENDPOINT_URL,
+        query_functor=query_slurm_get_endpoint_via_requests,
+        endpoint_url=SLURM_REST_SLURMDB_ENDPOINT_URL,
         endpoint_key='jobs',
         endpoint_method='GET',
     )
@@ -85,10 +93,13 @@ def get_job_info_for_job_id(job_id: int) -> Response:
     GET request handler for SLURM job information.
     This function retrieves the SLURM REST token from the request headers
     and returns it in the response, along with information about a specific job.
+
+    ref. https://slurm.schedmd.com/rest_api.html#slurmdbV0042GetJob (request)
+    ref. https://slurm.schedmd.com/rest_api.html#v0.0.42_openapi_slurmdbd_jobs_resp (response)
     """
     return run_query(
         username=SLURM_REST_GENERIC_USERNAME,
-        query_functor=query_slurm_endpoint_via_requests,
+        query_functor=query_slurm_get_endpoint_via_requests,
         endpoint_url=SLURM_REST_SLURMDB_ENDPOINT_URL,
         endpoint_key='job',
         endpoint_method='GET',
@@ -98,20 +109,45 @@ def get_job_info_for_job_id(job_id: int) -> Response:
     )
 
 
+@task_slurm_rest.route("/job/submit/", methods=["POST"])
+def submit_job() -> Response:
+    """
+    POST request handler for submitting a job to SLURM.
+    This function retrieves the SLURM REST token from the request headers
+    and returns it in the response, along with the job submission result.
+    
+    ref. https://slurm.schedmd.com/rest_api.html#slurmV0042PostJobSubmit (request)
+    ref. https://slurm.schedmd.com/rest_api.html#v0.0.42_openapi_job_submit_response (response)
+    """
+    if request.is_json:
+        job_data = request.get_json()
+
+    return run_query(
+        username=job_data['username'],
+        query_functor=query_slurm_post_endpoint_via_requests,
+        endpoint_url=SLURM_REST_SLURM_ENDPOINT_URL,
+        endpoint_key='job/submit',
+        endpoint_method='POST',
+        kwargs={
+            'job': job_data['job'],
+        }
+    )
+
+
 def run_query(username: str, query_functor: Callable, endpoint_url: str, endpoint_key: str, endpoint_method:str, **kwargs: Unpack[QueryParams]) -> None:
     """
     Generic request handler for SLURM REST API.
     This function retrieves the SLURM REST token from the request headers
     and returns it in the response.
     """
-    slurm_rest_auth_token = get_slurm_rest_jwt_token_via_env(username)
+    slurm_rest_auth_token = get_slurm_rest_jwt_token(username)
     if not slurm_rest_auth_token:
         print(" * Error: Failed to retrieve SLURM REST auth token", file=sys.stderr)
         return stream_json_response({"error": "Failed to retrieve SLURM REST auth token"}, 400)
     query_result = query_functor(slurm_rest_auth_token, endpoint_url, endpoint_key, endpoint_method, **(kwargs or {}))
     if not query_result:
         print(" * Error: Failed to retrieve query result", file=sys.stderr)
-        return stream_json_response({"error": "Failed to retrieve SLURM diag"}, 400)
+        return stream_json_response({"error": "Failed to retrieve SLURM data"}, 400)
     return stream_json_response(
         {
             "SLURM_JWT": slurm_rest_auth_token,
@@ -129,8 +165,11 @@ def get_slurm_rest_jwt_private_key_via_env() -> str:
     return slurm_private_key.strip()
 
 
-def get_slurm_rest_jwt_token_via_env(username: str) -> str:
+def get_slurm_rest_jwt_token(username: str) -> str:
     priv_key = get_slurm_rest_jwt_private_key_via_env()
+    if not priv_key:
+        print(" * Error: Failed to retrieve SLURM JWT private key", file=sys.stderr)
+        return None
     signing_key = jwk_from_dict({
       'kty': 'oct',
       'k': priv_key,
@@ -146,8 +185,12 @@ def get_slurm_rest_jwt_token_via_env(username: str) -> str:
     return compact_jws
 
 
+def get_slurm_rest_jwt_token_cmd(username: str) -> str:
+    return f"eval $(ssh login-pvm02 scontrol token username={username} lifespan={SLURM_REST_JWT_EXPIRATION_TIME}) && echo -n $SLURM_JWT" if username else f"eval $(ssh login-pvm02 scontrol token lifespan={SLURM_REST_JWT_EXPIRATION_TIME}) && echo -n $SLURM_JWT"
+
+
 def get_slurm_rest_jwt_token_via_cli(username: str) -> str:
-    cmd = f"eval $(ssh login-pvm02 scontrol token username={username} lifespan={SLURM_REST_JWT_EXPIRATION_TIME}) && echo -n $SLURM_JWT"
+    cmd = get_slurm_rest_jwt_token_cmd(username)
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
         raise Exception(f"Command '{cmd}' failed with error: {result.stderr}")
@@ -155,7 +198,7 @@ def get_slurm_rest_jwt_token_via_cli(username: str) -> str:
 
 
 def get_slurm_rest_jwt_token_via_ssh(username: str) -> str:
-    cmd = f"eval $(ssh login-pvm02 scontrol token username={username} lifespan={SLURM_REST_JWT_EXPIRATION_TIME}) && echo -n $SLURM_JWT"
+    cmd = get_slurm_rest_jwt_token_cmd(username)
     print(f" * Executing command: {cmd}", file=sys.stderr)
     (stdin, stdout, stderr) = ssh_client_exec(SSH_CLIENT, cmd)
     try:
@@ -170,8 +213,8 @@ def get_slurm_rest_query(endpoint_url: str, endpoint_key: str, **kwargs: Unpack[
     args = ""
     kwargs = kwargs['kwargs'] if 'kwargs' in kwargs else kwargs
     if len(kwargs.keys()) > 0:
-        for key, value in  kwargs.items():
-            if key in QueryParams:
+        for key, value in kwargs.items():
+            if key in QueryParams.__annotations__.keys():
                 args += f"/{value}"
     query_url = f"{endpoint_url}/{endpoint_key}/"
     if len(args) > 0:
@@ -192,13 +235,28 @@ def query_slurm_endpoint_via_ssh(slurm_rest_auth_token: str, endpoint_url: str, 
         return None
 
 
-def query_slurm_endpoint_via_requests(slurm_rest_auth_token: str, endpoint_url: str, endpoint_key: str, endpoint_method: str, **kwargs: Unpack[QueryParams]) -> str:
+def query_slurm_get_endpoint_via_requests(slurm_rest_auth_token: str, endpoint_url: str, endpoint_key: str, endpoint_method: str, **kwargs: Unpack[QueryParams]) -> str:
     query_url = get_slurm_rest_query(endpoint_url, endpoint_key, **kwargs)
     # print(f" * Querying SLURM endpoint: {endpoint_key} -> {query_url}", file=sys.stderr)
     headers = {
         'X-SLURM-USER-TOKEN': slurm_rest_auth_token,
     }
     response = requests.request(endpoint_method, query_url, headers=headers)
+    if response.status_code != 200:
+        print(f" * Error: {response.status_code} - {response.text}", file=sys.stderr)
+        return None
+    return response.json()
+
+
+def query_slurm_post_endpoint_via_requests(slurm_rest_auth_token: str, endpoint_url: str, endpoint_key: str, endpoint_method: str, **kwargs: Unpack[QueryParams]) -> str:
+    query_url = f"{endpoint_url}/{endpoint_key}/"
+    headers = {
+        'X-SLURM-USER-TOKEN': slurm_rest_auth_token,
+        'Content-Type': 'application/json',
+    }
+    payload = kwargs['kwargs']
+    print(f" * Querying SLURM POST endpoint: {endpoint_key} -> {query_url} | {payload}", file=sys.stderr)
+    response = requests.request(endpoint_method, query_url, headers=headers, json=payload)
     if response.status_code != 200:
         print(f" * Error: {response.status_code} - {response.text}", file=sys.stderr)
         return None

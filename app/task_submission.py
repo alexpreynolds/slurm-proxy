@@ -2,6 +2,8 @@
 
 import os
 import sys
+import json
+import requests
 from flask import (
     Blueprint,
     request,
@@ -13,14 +15,16 @@ from app.helpers import (
     stream_json_response,
 )
 from app.constants import (
+    APP_PORT,
     TASK_METADATA,
     BAD_SLURM_JOB_ID,
     SLURM_STATE_UNKNOWN,
-    TaskCommunicationMethods,
+    SlurmCommunicationMethods,
 )
 from app.task_monitoring import monitor_new_slurm_job
 
 SSH_CLIENT = ssh_client()
+SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.REST
 
 task_submission = Blueprint("task_submission", __name__)
 
@@ -47,7 +51,7 @@ def post() -> Response:
         return stream_json_response({"error": "No task provided"}, 400)
     if not is_task_valid(task):
         return stream_json_response({"error": "Invalid task format"}, 400)
-    submit_job_id = submit_slurm_task(task, TaskCommunicationMethods.SSH)
+    submit_job_id = submit_slurm_job(task, SLURM_COMMUNICATION_METHOD)
     if submit_job_id == BAD_SLURM_JOB_ID:
         return stream_json_response({"error": "Failed to submit task"}, 400)
     # if successful, submit job metadata to the monitor service
@@ -59,10 +63,10 @@ def post() -> Response:
     if not monitor_new_slurm_job(job):
         return stream_json_response({"error": "Failed to monitor job"}, 400)
     # return the task uuid back to the client
-    return stream_json_response({"uuid": task["uuid"]}, 200)
+    return stream_json_response({"uuid": task["uuid"], "slurm_job_id": submit_job_id}, 200)
 
 
-def submit_slurm_task(task: dict, submit_method: str) -> int:
+def submit_slurm_job(task: dict, submit_method: str) -> int:
     """
     Submit a task to the SLURM scheduler.
     This function constructs the command to create the necessary directories
@@ -80,16 +84,12 @@ def submit_slurm_task(task: dict, submit_method: str) -> int:
         int: The job ID of the submitted task, or BAD_SLURM_JOB_ID if the submission
             failed.
     """
-    if submit_method == TaskCommunicationMethods.SSH:
-        cmd = define_sbatch_cmd_for_task_via_ssh(task)
-        if not cmd:
-            print(" * Failed to define sbatch command", file=sys.stderr)
-            return BAD_SLURM_JOB_ID
-        job_id = send_sbatch_cmd_via_ssh(cmd) if cmd else BAD_SLURM_JOB_ID
+    if submit_method == SlurmCommunicationMethods.SSH:
+        job_id = submit_slurm_job_via_ssh(task)
         return job_id
-    elif submit_method == TaskCommunicationMethods.REST:
-        print(f" * Unsupported task submit method: {submit_method}", file=sys.stderr)
-        return BAD_SLURM_JOB_ID
+    elif submit_method == SlurmCommunicationMethods.REST:
+        job_id = submit_slurm_job_via_rest(task)
+        return job_id
     else:
         print(f" * Unsupported task submit method: {submit_method}", file=sys.stderr)
         return BAD_SLURM_JOB_ID
@@ -163,7 +163,7 @@ def define_task_cmd(task_name: str, task_params: list) -> str:
         str: The full command for the task, or None if the task is not defined.
     """
     if task_name not in TASK_METADATA:
-        print(f" * Task {task_name} is not defined", file=sys.stderr)
+        print(f" * Task {task_name} is invalid", file=sys.stderr)
         return None
     task_cmd = [TASK_METADATA[task_name]["cmd"]]
     for default_param in TASK_METADATA[task_name]["default_params"]:
@@ -174,7 +174,7 @@ def define_task_cmd(task_name: str, task_params: list) -> str:
     return task_cmd
 
 
-def send_sbatch_cmd_via_ssh(cmd: str) -> int:
+def submit_slurm_job_via_ssh(task: dict) -> int:
     """
     Send the sbatch command to the SLURM scheduler via SSH.
     This function connects to the SLURM scheduler using SSH and executes
@@ -182,17 +182,19 @@ def send_sbatch_cmd_via_ssh(cmd: str) -> int:
     If the command fails, it returns BAD_SLURM_JOB_ID.
 
     Args:
-        cmd (str): The sbatch command to be executed.
+        task (dict): The task dictionary containing information about the task
+            to be submitted.
 
     Returns:
         int: The job ID of the submitted task, or BAD_SLURM_JOB_ID if the submission
             failed.
     """
+    cmd = define_sbatch_cmd_for_task_via_ssh(task)
     if not cmd:
-        print(f" * sbatch command is empty", file=sys.stderr)
+        print(" * Failed to define sbatch command; validate task parameters", file=sys.stderr)
         return BAD_SLURM_JOB_ID
-    (stdin, stdout, stderr) = ssh_client_exec(SSH_CLIENT, cmd)
     try:
+        (stdin, stdout, stderr) = ssh_client_exec(SSH_CLIENT, cmd)
         # use of '--parsable' option in sbatch command means that
         # the job id (integer) is the only thing sent to standard output
         job_id = int(stdout.read().decode("utf-8"))
@@ -207,6 +209,97 @@ def send_sbatch_cmd_via_ssh(cmd: str) -> int:
     return job_id
 
 
+def submit_slurm_job_via_rest(task: dict) -> int:
+    """
+    Send the job to the SLURM scheduler via RESTful request.
+
+    This function submits a preliminary job to the SLURM scheduler using a RESTful
+    request, which generates directories for input, output, and error files. The
+    job id that results is used as a dependency for the actual (main) job.
+
+    This function then constructs the equivalent sbatch command using the 
+    parameters provided in the task dictionary and sends it to the SLURM
+    scheduler via REST API.
+
+    Args:
+        task (dict): The task dictionary containing information about the task
+            to be submitted.
+
+    Returns:
+        int: The job ID of the submitted task, or BAD_SLURM_JOB_ID if the submission
+            failed.
+    """
+    preliminary_payload = define_preliminary_slurm_rest_payload_for_task(task)
+    if not preliminary_payload:
+        print(" * Failed to define preliminary REST payload for submission; validate task parameters", file=sys.stderr)
+        return BAD_SLURM_JOB_ID
+    endpoint_key = 'job/submit'
+    query_url = f"http://127.0.0.1:{APP_PORT}/slurm/{endpoint_key}/"
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+    try:
+        # first, submit the preliminary job to SLURM, which creates the necessary directories
+        preliminary_response = requests.post(query_url, headers=headers, json=preliminary_payload)
+        if preliminary_response.status_code != 200:
+            print(f" * Error: {preliminary_response.status_code} - {preliminary_response.text}", file=sys.stderr)
+            return BAD_SLURM_JOB_ID
+        preliminary_job_id = preliminary_response.json()[endpoint_key].get("job_id", None)
+        print(f" * SLURM job ID: {preliminary_job_id}", file=sys.stderr)
+        if not preliminary_job_id:
+            print(" * Failed to retrieve job ID from SLURM REST API response", file=sys.stderr)
+            return BAD_SLURM_JOB_ID
+    except requests.RequestException as err:
+        print(f" * Error: {err}", file=sys.stderr)
+        return BAD_SLURM_JOB_ID
+    
+    # now submit the actual job to SLURM, using the job ID from the preliminary job as a dependency
+    main_job_id = preliminary_job_id
+    return main_job_id
+
+
+def define_preliminary_slurm_rest_payload_for_task(task: dict) -> dict:
+    """
+    Construct the payload for the SLURM RESTful request.
+    This function creates the payload to be sent to the SLURM scheduler
+    via REST API. It includes the necessary directories for input, output,
+    and error files, as well as the SLURM parameters and task command.
+
+    Args:
+        task (dict): The task dictionary containing information about the task
+            to be submitted.
+
+    Returns:  
+        dict: The payload for the SLURM RESTful request.
+    """
+    
+    try:
+        dir_comps = task["dirs"]
+        input_dir = dir_comps["input"]
+        output_dir = dir_comps["output"]
+        error_dir = dir_comps["error"]
+        slurm_cmd = f"#!/bin/bash\nsrun /bin/bash -c 'mkdir -p {input_dir}; mkdir -p {output_dir}; mkdir -p {error_dir};'"
+        slurm_obj = {
+            "username": task["username"],
+            "job": {
+                "script": slurm_cmd,
+                "environment": [ "PATH=/bin/:/usr/bin/:/sbin/" ],
+                "current_working_directory": f"{task['cwd']}",
+                "name": f"hpc-proxy-preliminary-{task['name']}-{task['uuid']}",
+                "partition": task["slurm"]["partition"],
+                "cpus_per_task": 1,
+                "memory_per_cpu": { "set": True, "number": 100 },
+                "time_limit": { "set": True, "number": 100 },
+            },
+        }
+        # print(f" * SLURM preliminary payload: {slurm_obj}", file=sys.stderr)
+        return slurm_obj
+    except KeyError as err:
+        print(f" * Error: Missing keys from task.dirs - {err}", file=sys.stderr)
+        return None
+
+
 def is_task_valid(task: dict) -> bool:
     """
     Validate the task dictionary.
@@ -219,4 +312,4 @@ def is_task_valid(task: dict) -> bool:
     Returns:
         bool: True if the task is valid, False otherwise.
     """
-    return all([k in task for k in ["name", "params", "uuid", "slurm", "dirs"]])
+    return all([k in task for k in ["name", "params", "username", "uuid", "slurm", "dirs"]])

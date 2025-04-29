@@ -1,6 +1,6 @@
 services:
   frontend:
-    container_name: dt-slurm-proxy
+    container_name: hpc-proxy
     build:
       context: ../
       dockerfile: ./docker/Dockerfile

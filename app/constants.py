@@ -63,11 +63,10 @@ TASK_METADATA = {
 }
 
 """
-Task submission methods
+SLURM job submission methods
 """
 
-
-class TaskCommunicationMethods(Enum):
+class SlurmCommunicationMethods(Enum):
     SSH = 1
     REST = 2
 

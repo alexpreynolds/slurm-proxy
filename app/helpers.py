@@ -9,6 +9,7 @@ from flask import (
     json,
     stream_with_context,
 )
+from socket import gaierror
 
 
 def ssh_client() -> paramiko.SSHClient:
@@ -58,6 +59,10 @@ def ssh_client_exec(ssh_client: paramiko.SSHClient, cmd: str) -> tuple:
             timeout=10,
         )
         return ssh_client.exec_command(cmd)
+    except gaierror as err:
+        print(f" * SSH connection failed: {err}", file=sys.stderr)
+        # print(f" * SSH_AUTH_SOCK={os.environ.get('SSH_AUTH_SOCK')}", file=sys.stderr)
+        # sys.exit(-1)
     except paramiko.SSHException as err:
         print(f" * SSH connection failed: {err}", file=sys.stderr)
         # print(f" * SSH_AUTH_SOCK={os.environ.get('SSH_AUTH_SOCK')}", file=sys.stderr)

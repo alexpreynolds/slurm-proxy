@@ -118,7 +118,7 @@ to the SLURM scheduler, and the `SSH_HOSTNAME` is the hostname of the SLURM sche
 """
 SSH_USERNAME = os.environ.get("SSH_USERNAME", "areynolds")
 SSH_HOSTNAME = os.environ.get("SSH_HOSTNAME", "login.altius.org")
-SSH_PRIVATE_KEY_PATH = os.path.expanduser(f"/Users/{SSH_USERNAME}/.ssh/id_ed25519")
+SSH_PRIVATE_KEY_PATH = os.environ.get("SSH_PRIVATE_KEY_PATH", os.path.expanduser(f"/Users/{SSH_USERNAME}/.ssh/id_ed25519"))
 try:
     SSH_PRIVATE_KEY = paramiko.Ed25519Key.from_private_key_file(SSH_PRIVATE_KEY_PATH)
 except FileNotFoundError as err:

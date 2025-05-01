@@ -128,3 +128,15 @@ def stream_json_response(data: dict, status_code: int = 200) -> Response:
     )
     response.headers["Content-Type"] = "application/json"
     return response
+
+
+def get_dict_from_streamed_json_response(response_as_json: Response) -> dict:
+    res = ''
+    while True:
+        try:
+            res += next(response_as_json.response)
+            # print(f'res: {res}')
+        except StopIteration:
+            break
+    res = json.loads(res)
+    return res

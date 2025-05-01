@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 
 import os
-
+# import logging
+# import logging.config
 from flask import Flask
+from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.task_submission import task_submission
@@ -24,11 +26,18 @@ def create_app():
     the MongoDB connection. It also initializes the background scheduler
     for polling SLURM jobs.
     """
+    dotenv_path = os.environ.get("DOTENV_FILE", os.path.join(os.path.dirname(__file__), '.env'))
+    if os.path.exists(dotenv_path):
+        load_dotenv(dotenv_path)
+
     slurm_private_key = os.environ.get("SLURM_JWT_HS256_KEY_BASE64")
     if not slurm_private_key:
         raise ValueError("SLURM_JWT_HS256_KEY_BASE64 environment variable not set")
 
     app = Flask(APP_NAME)
+    # app.config.from_object('app.config.Config')
+    # logging.config.dictConfig(app.config['LOGGING_CONFIG'])
+
     app.register_blueprint(task_submission, url_prefix="/submit")
     app.register_blueprint(task_monitoring, url_prefix="/monitor")
     app.register_blueprint(task_slurm_rest, url_prefix="/slurm")

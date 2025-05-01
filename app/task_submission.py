@@ -3,7 +3,6 @@
 import os
 import sys
 import json
-import requests
 from flask import (
     Blueprint,
     request,
@@ -13,9 +12,9 @@ from app.helpers import (
     ssh_client,
     ssh_client_exec,
     stream_json_response,
+    get_dict_from_streamed_json_response,
 )
 from app.constants import (
-    APP_PORT,
     TASK_METADATA,
     BAD_SLURM_JOB_ID,
     SLURM_STATE_UNKNOWN,
@@ -137,7 +136,7 @@ def define_sbatch_cmd_for_task_via_ssh(task: dict) -> str:
     slurm_cmd_comps.append(f"--partition={slurm_comps['partition']}")
     if slurm_comps["time"]:
         slurm_cmd_comps.append(f"--time={slurm_comps['time']}")
-    task_cmd = define_task_cmd(task["name"], task["params"])
+    task_cmd = define_task_cmd(task["name"], task.get('cmd', None), task["params"])
     if not task_cmd:
         return None
     slurm_cmd_comps.append(f"--wrap='{task_cmd}'")
@@ -149,7 +148,7 @@ def define_sbatch_cmd_for_task_via_ssh(task: dict) -> str:
     return cmd
 
 
-def define_task_cmd(task_name: str, task_params: list) -> str:
+def define_task_cmd(task_name: str, task_cmd: str, additional_task_params: list) -> str:
     """
     Construct the command for the task.
     This function retrieves the command template for the specified task
@@ -157,7 +156,9 @@ def define_task_cmd(task_name: str, task_params: list) -> str:
 
     Args:
         task_name (str): The name of the task.
-        task_params (list): The parameters for the task.
+        task_cmd (str): The command for the task, if specified.
+        additional_task_params (list): Additional parameters for the command
+            that are not provided as default parameters.
 
     Returns:
         str: The full command for the task, or None if the task is not defined.
@@ -165,13 +166,13 @@ def define_task_cmd(task_name: str, task_params: list) -> str:
     if task_name not in TASK_METADATA:
         print(f" * Task {task_name} is invalid", file=sys.stderr)
         return None
-    task_cmd = [TASK_METADATA[task_name]["cmd"]]
+    cmd = [task_cmd if task_cmd else TASK_METADATA[task_name]["cmd"]]
     for default_param in TASK_METADATA[task_name]["default_params"]:
-        task_cmd.append(default_param)
-    for additional_param in task_params:
-        task_cmd.append(additional_param)
-    task_cmd = " ".join(task_cmd)
-    return task_cmd
+        cmd.append(default_param)
+    for additional_param in additional_task_params:
+        cmd.append(additional_param)
+    cmd = " ".join(cmd)
+    return cmd
 
 
 def submit_slurm_job_via_ssh(task: dict) -> int:
@@ -204,7 +205,7 @@ def submit_slurm_job_via_ssh(task: dict) -> int:
             print(f" * Failed sbatch submit: {stderr_val}", file=sys.stderr)
             return BAD_SLURM_JOB_ID
     except ValueError as err:
-        print(f" * Error: {err}", file=sys.stderr)
+        print(f" * Error: submit_slurm_job_via_ssh - {err}", file=sys.stderr)
         return BAD_SLURM_JOB_ID
     return job_id
 
@@ -229,37 +230,100 @@ def submit_slurm_job_via_rest(task: dict) -> int:
         int: The job ID of the submitted task, or BAD_SLURM_JOB_ID if the submission
             failed.
     """
-    preliminary_payload = define_preliminary_slurm_rest_payload_for_task(task)
+    from app.task_slurm_rest import submit_job_via_params
+
+    preliminary_payload = get_preliminary_slurm_rest_payload_for_task(task)
     if not preliminary_payload:
         print(" * Failed to define preliminary REST payload for submission; validate task parameters", file=sys.stderr)
         return BAD_SLURM_JOB_ID
-    endpoint_key = 'job/submit'
-    query_url = f"http://127.0.0.1:{APP_PORT}/slurm/{endpoint_key}/"
-    headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-    }
-    try:
-        # first, submit the preliminary job to SLURM, which creates the necessary directories
-        preliminary_response = requests.post(query_url, headers=headers, json=preliminary_payload)
-        if preliminary_response.status_code != 200:
-            print(f" * Error: {preliminary_response.status_code} - {preliminary_response.text}", file=sys.stderr)
+    # print(f" * SLURM preliminary payload: {preliminary_payload}", file=sys.stderr)
+    preliminary_response = submit_job_via_params(preliminary_payload)
+    if preliminary_response.status_code != 200:
+        try:
+            preliminary_response_text = preliminary_response.text
+            print(f" * Error: {preliminary_response.status_code} - Preliminary submit step failed - {preliminary_response_text}", file=sys.stderr)
             return BAD_SLURM_JOB_ID
-        preliminary_job_id = preliminary_response.json()[endpoint_key].get("job_id", None)
-        print(f" * SLURM job ID: {preliminary_job_id}", file=sys.stderr)
-        if not preliminary_job_id:
-            print(" * Failed to retrieve job ID from SLURM REST API response", file=sys.stderr)
+        except AttributeError as err:
+            print(f" * Error: {preliminary_response.status_code} - Preliminary submit step failed - {err}", file=sys.stderr)
             return BAD_SLURM_JOB_ID
-    except requests.RequestException as err:
-        print(f" * Error: {err}", file=sys.stderr)
+    response = get_dict_from_streamed_json_response(preliminary_response)
+    preliminary_job_id = response['response'].get('job_id', BAD_SLURM_JOB_ID)
+
+    if preliminary_job_id == BAD_SLURM_JOB_ID:
+        print(f" * Error: Failed to create preliminary job - {response}", file=sys.stderr)
+        return BAD_SLURM_JOB_ID
+
+    # print(f" * SLURM preliminary job id: {preliminary_job_id}", file=sys.stderr)
+    
+    # construct the command payload for the main job
+    main_payload = get_main_slurm_rest_payload_for_task(task, preliminary_job_id)
+    if not main_payload:
+        print(" * Failed to define main REST payload for submission; validate task parameters", file=sys.stderr)
+        return BAD_SLURM_JOB_ID
+    # print(f" * SLURM main payload: {main_payload}", file=sys.stderr)
+    main_response = submit_job_via_params(main_payload)
+    if main_response.status_code != 200:
+        print(f" * Error: {main_response.status_code} - {main_response.text}", file=sys.stderr)
+        return BAD_SLURM_JOB_ID
+    response = get_dict_from_streamed_json_response(main_response)
+    main_job_id = response['response'].get('job_id', BAD_SLURM_JOB_ID)
+    if main_job_id == BAD_SLURM_JOB_ID: 
+        print(f" * Error: Failed to create main job - {response}", file=sys.stderr)
         return BAD_SLURM_JOB_ID
     
-    # now submit the actual job to SLURM, using the job ID from the preliminary job as a dependency
-    main_job_id = preliminary_job_id
+    # print(f" * SLURM main job id: {main_job_id}", file=sys.stderr)
+
+    # main_job_id is what needs to be returned to the client for monitoring
     return main_job_id
 
 
-def define_preliminary_slurm_rest_payload_for_task(task: dict) -> dict:
+def get_main_slurm_rest_payload_for_task(task: dict, preliminary_job_id: int) -> dict:
+    """
+    Construct the payload for the SLURM RESTful request.
+    This function creates the payload to be sent to the SLURM scheduler
+    via REST API. It includes the necessary directories for input, output,
+    and error files, as well as the SLURM parameters and task command.
+
+    Args:
+        task (dict): The task dictionary containing information about the task
+            to be submitted.
+        preliminary_job_id (int): The job ID of the preliminary job that was created
+            to create the necessary directories.
+
+    Returns:  
+        dict: The payload for the SLURM RESTful request.
+    """
+    try:
+        dir_comps = task["dirs"]
+        # parent_dir = dir_comps["parent"]
+        output_dir = dir_comps["output"]
+        error_dir = dir_comps["error"]
+        task_cmd = define_task_cmd(task["name"], task.get("cmd", None), task["params"])
+        slurm_cmd = f"#!/bin/bash\nsrun /bin/bash -c \'{task_cmd};\'"
+        slurm_obj = {
+            "username": task["username"],
+            "job": {
+                "script": slurm_cmd,
+                "environment": [ "PATH=/bin/:/usr/bin/:/sbin/" ],
+                "current_working_directory": f"{task['cwd']}",
+                "name": f"hpc-proxy-{task['name']}-{task['uuid']}-main",
+                "partition": task["slurm"]["partition"],
+                "cpus_per_task": task["slurm"]["cpus_per_task"],
+                "memory_per_cpu": { "set": True, "number": task["slurm"]["mem"] },
+                "time_limit": { "set": True, "number": task["slurm"]["time"] },
+                "standard_output": f'{output_dir}/{task["slurm"]["output"]}',
+                "standard_error": f'{error_dir}/{task["slurm"]["error"]}',
+                "dependency": f"afterok:{preliminary_job_id}",
+            },
+        }
+        # print(f" * SLURM main payload: {slurm_obj}", file=sys.stderr)
+        return slurm_obj
+    except KeyError as err:
+        print(f" * Error: Missing keys from task - {task} - {err}", file=sys.stderr)
+        return None
+
+
+def get_preliminary_slurm_rest_payload_for_task(task: dict) -> dict:
     """
     Construct the payload for the SLURM RESTful request.
     This function creates the payload to be sent to the SLURM scheduler
@@ -276,17 +340,24 @@ def define_preliminary_slurm_rest_payload_for_task(task: dict) -> dict:
     
     try:
         dir_comps = task["dirs"]
+        parent_dir = dir_comps["parent"]
         input_dir = dir_comps["input"]
         output_dir = dir_comps["output"]
         error_dir = dir_comps["error"]
-        slurm_cmd = f"#!/bin/bash\nsrun /bin/bash -c 'mkdir -p {input_dir}; mkdir -p {output_dir}; mkdir -p {error_dir};'"
+        mkdir_cmds = []
+        mkdir_cmds.append(f"mkdir -p {parent_dir}")
+        mkdir_cmds.append(f"mkdir -p {input_dir}")
+        mkdir_cmds.append(f"mkdir -p {output_dir}")
+        mkdir_cmds.append(f"mkdir -p {error_dir}")
+        mkdir_cmd = " ; ".join(mkdir_cmds)
+        slurm_cmd = f"#!/bin/bash\nsrun /bin/bash -c \'{mkdir_cmd};\'"
         slurm_obj = {
             "username": task["username"],
             "job": {
                 "script": slurm_cmd,
                 "environment": [ "PATH=/bin/:/usr/bin/:/sbin/" ],
                 "current_working_directory": f"{task['cwd']}",
-                "name": f"hpc-proxy-preliminary-{task['name']}-{task['uuid']}",
+                "name": f"hpc-proxy-preliminary-{task['name']}-{task['uuid']}-preliminary",
                 "partition": task["slurm"]["partition"],
                 "cpus_per_task": 1,
                 "memory_per_cpu": { "set": True, "number": 100 },
@@ -312,4 +383,4 @@ def is_task_valid(task: dict) -> bool:
     Returns:
         bool: True if the task is valid, False otherwise.
     """
-    return all([k in task for k in ["name", "params", "username", "uuid", "slurm", "dirs"]])
+    return all([k in task for k in ["name", "params", "username", "cwd", "uuid", "slurm", "dirs"]])

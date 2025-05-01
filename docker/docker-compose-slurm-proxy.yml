@@ -1,11 +1,12 @@
 services:
   frontend:
-    container_name: hpc-proxy
+    container_name: slurm-proxy
     build:
       context: ../
       dockerfile: ./docker/Dockerfile
     volumes:
       - /Users/areynolds/.ssh:/Users/areynolds/.ssh:ro
+      - /home/areynolds/.ssh:/home/areynolds/.ssh:ro
     ports:
       - "5001:5001"
     cap_add:

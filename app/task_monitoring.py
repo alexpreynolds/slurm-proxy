@@ -8,21 +8,28 @@ from flask import (
     request,
     Response,
 )
-from app.helpers import ssh_client, ssh_client_exec, stream_json_response
+from app.helpers import (
+    ssh_client,
+    ssh_client_exec,
+    stream_json_response,
+    get_dict_from_streamed_json_response,
+)
 from app.constants import (
     SLURM_STATE,
     SLURM_STATE_UNKNOWN,
     SLURM_STATE_END_STATES,
     SLURM_TEST_JOB_ID,
     SLURM_TEST_JOB_STATUS,
+    SLURM_REST_GENERIC_USERNAME,
     MONGODB_JOBS_COLLECTION,
     TASK_METADATA,
+    SlurmCommunicationMethods
 )
 from app.task_notification import NotificationCallbacks
 
 SSH_CLIENT = ssh_client()
-
 SLURM_STATES_ALLOWED = SLURM_STATE.keys()
+SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.REST
 
 task_monitoring = Blueprint("task_monitoring", __name__)
 
@@ -41,11 +48,11 @@ def post() -> Response:
     request_info = request.get_json(force=True)
     job = request_info.get("job")
     if not job:
-        return {"error": "No job provided"}, 400
+        return {"error": "No job provided to be monitored"}, 400
     response = (
         stream_json_response(job, 200)
         if monitor_new_slurm_job(job)
-        else stream_json_response({"Error": "Failed to monitor job"}, 400)
+        else stream_json_response({"error": "Failed to monitor job"}, 400)
     )
     return response
 
@@ -62,13 +69,20 @@ def get_job_metadata_by_slurm_job_id(slurm_job_id: str) -> Response:
     Returns:
         Response: A Flask Response object containing the job metadata in JSON format.
     """
+    slurm_username = request.args.get("username")
+    if not slurm_username:
+        slurm_username = SLURM_REST_GENERIC_USERNAME
     slurm_job_id = int(slurm_job_id)
     slurm_job_status_metadata = get_current_slurm_job_metadata_by_slurm_job_id(
-        slurm_job_id
+        slurm_job_id,
+        slurm_username,
     )
+    # if not slurm_job_status_metadata:
+        # job not found in SLURM scheduler for specified ID and username
+        # return {"error": "Job information not found"}, 404
     monitor_db_job_metadata = get_job_metadata_from_monitor_db(slurm_job_id)
     if not slurm_job_status_metadata and not monitor_db_job_metadata:
-        return {"error": "Job information not found"}, 404
+        return {"error": "Job and monitor information not found"}, 404
     slurm_job_state = (
         slurm_job_status_metadata["state"]
         if slurm_job_status_metadata
@@ -182,8 +196,10 @@ def monitor_new_slurm_job(job: dict) -> bool:
     except TypeError as err:
         print(f" * Error: {job['slurm_job_id']} {err}", file=sys.stderr)
         return False
+    slurm_username = job["task"]["username"]
     slurm_job_status_metadata = get_current_slurm_job_metadata_by_slurm_job_id(
-        slurm_job_id
+        slurm_job_id,
+        slurm_username,
     )
     if not slurm_job_status_metadata:
         return False
@@ -196,7 +212,7 @@ def monitor_new_slurm_job(job: dict) -> bool:
     slurm_job_task_metadata = job["task"]
     # print(f" * Adding job to monitor database: {slurm_job_id} | {slurm_job_state}", file=sys.stderr)
     result = add_job_to_monitor_db(
-        slurm_job_id, slurm_job_state, slurm_job_task_metadata
+        slurm_job_id, slurm_job_state, slurm_job_task_metadata, slurm_username
     )
     # if the job is already completed, we send a notification msg
     if slurm_job_state in SLURM_STATE_END_STATES:
@@ -205,7 +221,7 @@ def monitor_new_slurm_job(job: dict) -> bool:
 
 
 def add_job_to_monitor_db(
-    slurm_job_id: int, slurm_job_state: str, slurm_job_task_metadata: dict
+    slurm_job_id: int, slurm_job_state: str, slurm_job_task_metadata: dict, slurm_username: str
 ) -> bool:
     """
     Add a new job to the monitor database.
@@ -216,13 +232,15 @@ def add_job_to_monitor_db(
         slurm_job_id (int): The SLURM job ID.
         slurm_job_state (str): The SLURM job state.
         slurm_job_task_metadata (dict): The task metadata for the job.
+        slurm_username (str): The SLURM job username.
 
     Returns:
         bool: True if the job was successfully added to the monitor database, False otherwise.
     """
     if slurm_job_state == SLURM_STATE_UNKNOWN:
         current_slurm_job_metadata = get_current_slurm_job_metadata_by_slurm_job_id(
-            slurm_job_id
+            slurm_job_id,
+            slurm_username,
         )
         if current_slurm_job_metadata:
             slurm_job_state = current_slurm_job_metadata["state"]
@@ -335,16 +353,67 @@ def remove_and_return_job_from_monitor_db_by_slurm_job_id(slurm_job_id: int) -> 
         return None
 
 
-def get_current_slurm_job_metadata_by_slurm_job_id(slurm_job_id: int) -> dict:
-    return get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(slurm_job_id)
+def get_current_slurm_job_metadata_by_slurm_job_id(slurm_job_id: int, slurm_username: str) -> dict:
+    if SLURM_COMMUNICATION_METHOD == SlurmCommunicationMethods.SSH:
+      return get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(slurm_job_id, slurm_username)
+    elif SLURM_COMMUNICATION_METHOD == SlurmCommunicationMethods.REST:
+      return get_current_slurm_job_metadata_by_slurm_job_id_via_rest(slurm_job_id, slurm_username)
 
 
-def get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(slurm_job_id: int) -> dict:
+def get_current_slurm_job_metadata_by_slurm_job_id_via_rest(slurm_job_id: int, slurm_username: str) -> dict:
+    if not slurm_job_id:
+        return None
+    if not slurm_username:
+        slurm_username = SLURM_REST_GENERIC_USERNAME
+    # test case
+    if slurm_job_id == SLURM_TEST_JOB_ID:
+        return SLURM_TEST_JOB_STATUS
+    # REST API call to get the job status
+    from app.task_slurm_rest import get_job_info_for_job_id_via_params
+    response, query_url = get_job_info_for_job_id_via_params(slurm_job_id, slurm_username)
+    job_status_response = response
+    if not job_status_response:
+        print(f" * Error: No job status information found for job ID {slurm_job_id} and user {slurm_username}", file=sys.stderr)
+        return None
+    job_status_jobs = job_status_response.get("jobs", None)
+    # import pprint
+    # print(f" * Job status jobs: {pprint.pprint(job_status_jobs)}", file=sys.stderr)
+    if not job_status_jobs or len(job_status_jobs) == 0:
+        print(f" * Error: No job status information found for job ID {slurm_job_id} and user {slurm_username}", file=sys.stderr)
+        return None
+    job_status_job_instance = job_status_jobs[0]
+    # ref. https://slurm.schedmd.com/rest_api.html#v0.0.42_openapi_slurmdbd_jobs_resp
+    try:
+        result = {
+            "state": SLURM_STATE_UNKNOWN,
+            "user": slurm_username
+        }
+        if job_status_job_instance["state"]["current"][0] not in SLURM_STATES_ALLOWED:
+            result["state"] = SLURM_STATE_UNKNOWN
+        else:
+            result["state"] = job_status_job_instance["state"]["current"][0]
+        if job_status_job_instance["user"] != slurm_username:
+            result["user"] = slurm_username
+            print(f" * Warning: Job {slurm_job_id} is not owned by user {slurm_username}", file=sys.stderr)
+            # raise NameError(
+            #     f"Job {slurm_job_id} is not owned by user {slurm_username}"
+            # )
+        return result
+    except TypeError as err:
+        print(f" * Error: {err}\n {job_status_job_instance}", file=sys.stderr)
+        return None
+    except NameError as err:
+        print(f" * Error: {err}", file=sys.stderr)
+        return None
+
+
+def get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(slurm_job_id: int, slurm_username: str) -> dict:
     """
     Get the current SLURM job metadata by job ID via SSH.
 
     Args:
         slurm_job_id (int): The SLURM job ID.
+        slurm_username (str): The SLURM job username.
 
     Returns:
         dict: A dictionary containing the job metadata, or None if the job was not found.
@@ -388,8 +457,15 @@ def get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(slurm_job_id: int) ->
         job_status = dict(zip(job_status_keys, job_status_components))
         if job_status["state"] not in SLURM_STATES_ALLOWED:
             job_status["state"] = SLURM_STATE_UNKNOWN
+        if job_status["user"] != slurm_username:
+            raise NameError(
+                f"Job {slurm_job_id} is not owned by user {slurm_username}"
+            )
         return job_status
     except TypeError as err:
+        print(f" * Error: {err}", file=sys.stderr)
+        return None
+    except NameError as err:
         print(f" * Error: {err}", file=sys.stderr)
         return None
 
@@ -461,13 +537,18 @@ def poll_slurm_jobs() -> None:
         for job in jobs:
             slurm_job_id = int(job["slurm_job_id"])
             monitor_db_job_state = job["slurm_job_state"]
+            slurm_username = job["task"].get("username", SLURM_REST_GENERIC_USERNAME)
             # print(f'poll: testing {slurm_job_id} | {monitor_db_job_state}', file=sys.stderr)
             if monitor_db_job_state in SLURM_STATE_END_STATES:
                 # job is already completed, therefore no need to check its state
                 continue
             slurm_job_status_metadata = get_current_slurm_job_metadata_by_slurm_job_id(
-                slurm_job_id
+                slurm_job_id,
+                slurm_username,
             )
+            if not slurm_job_status_metadata:
+                # job not found in SLURM scheduler for specified ID and username
+                continue
             current_slurm_job_state = slurm_job_status_metadata["state"]
             if monitor_db_job_state != current_slurm_job_state:
                 new_slurm_job_state = (

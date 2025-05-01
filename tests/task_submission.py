@@ -24,6 +24,7 @@ class TestTaskSubmission(unittest.TestCase):
         test_data = {
             "task": {
                 "dirs": {
+                    "parent": "/home/areynolds/dt-slurm-proxy",
                     "error": "/home/areynolds/dt-slurm-proxy/error",
                     "input": "/home/areynolds/dt-slurm-proxy/input",
                     "output": "/home/areynolds/dt-slurm-proxy/output",
@@ -32,17 +33,18 @@ class TestTaskSubmission(unittest.TestCase):
                     "cpus_per_task": 1,
                     "error": "dt-slurm-proxy.hello_world.error.txt",
                     "job_name": "dt-slurm-proxy.hello_world",
-                    "mem": "1G",
+                    "mem": 1000,
                     "nodes": 1,
                     "ntasks_per_node": 1,
                     "output": "dt-slurm-proxy.hello_world.output.txt",
                     "partition": "queue1",
-                    "time": "00:30:00",
+                    "time": 1800,
                 },
                 "name": "echo_hello_world",
+                "cmd": "echo",
                 "params": [
                     "-e",
-                    '"Hello world!\t(sent to $USER)\n"',
+                    "\"hello, world! (sent to $SLURM_JOB_USER at `date`)\"",
                 ],
                 "uuid": "123e4567-e89b-12d3-a456-426614174000",
                 "username": "areynolds",

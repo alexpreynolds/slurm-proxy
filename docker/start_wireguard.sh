@@ -20,6 +20,14 @@ chmod 600 "$CONFIG_FILE"
 wg-quick up wg0
 
 # Set up routing for 10.0.0.0/8 network through WireGuard
-ip route add 10.0.0.0/8 dev wg0
+ip route replace 10.0.0.0/8 dev wg0
+
+# Make sure DNS settings are applied
+echo "Configuring DNS settings..."
+cat > /etc/resolv.conf << EOF
+nameserver 10.129.16.3
+nameserver 10.129.16.4
+search altius.org
+EOF
 
 echo "WireGuard VPN is now connected"

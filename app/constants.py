@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import os
-import pymongo
+import sys
 import paramiko
 from enum import Enum
 from app.task_notification import NotificationCallbacks
@@ -9,7 +9,7 @@ from app.task_notification import NotificationCallbacks
 """
 Application name and port
 """
-APP_NAME = os.environ.get("NAME", "dt-slurm-proxy")
+APP_NAME = os.environ.get("NAME", "slurm-proxy")
 APP_PORT = os.environ.get("PORT", 5001)
 
 """
@@ -129,12 +129,9 @@ except FileNotFoundError as err:
 Mongodb connection
 """
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-MONGODB_CLIENT = pymongo.MongoClient(
-    MONGODB_URI,
-    serverSelectionTimeoutMS=1000,
-)
-MONGODB_MONITOR_DB = MONGODB_CLIENT["monitordb"]
-MONGODB_JOBS_COLLECTION = MONGODB_MONITOR_DB["jobs"]
+MONGODB_MONITOR_DB = os.getenv("MONGODB_MONITOR_DB", "monitordb")
+MONGODB_TIMEOUT = os.getenv("MONGODB_TIMEOUT", 1000)  # in milliseconds
+MONGODB_MONITOR_JOBS_COLLECTION = os.getenv("MONGODB_MONITOR_JOBS_COLLECTION", "jobs")
 
 """
 How frequently to poll the SLURM scheduler for job status updates.
@@ -267,5 +264,5 @@ SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION = os.environ.get("SLURM_REST_API_DATA_
 SLURM_REST_HOST = os.environ.get("SLURM_REST_HOST", "https://slurmapi.altius.org")
 SLURM_REST_SLURM_ENDPOINT_URL = os.environ.get("SLURM_REST_URL", f"{SLURM_REST_HOST}/slurm/v{SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION}")
 SLURM_REST_SLURMDB_ENDPOINT_URL = os.environ.get("SLURM_REST_URL", f"{SLURM_REST_HOST}/slurmdb/v{SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION}")
-SLURM_REST_JWT_EXPIRATION_TIME = os.environ.get("SLURM_REST_JWT_EXPIRATION_TIME", 30)
-SLURM_REST_GENERIC_USERNAME = "generic_user"
+SLURM_REST_JWT_EXPIRATION_TIME = int(os.environ.get("SLURM_REST_JWT_EXPIRATION_TIME", 10))
+SLURM_REST_GENERIC_USERNAME = "generic"

@@ -1,4 +1,4 @@
-# hpc-proxy
+# slurm-proxy
 
 ### In Progress
 
@@ -9,6 +9,8 @@
   - [ ] Run basic test with different users
     - [x] Test overall task submission against `areynolds`
     - [ ] Test overall task submission against another user account that can access the cluster
+      - [ ] Get `slurmapitest` account set up
+      - [ ] Request the account is closed, if tests pass
 
 - [x] Task SLURM REST endpoints @alexpreynolds
   - [x] Test `slurm/jobs/` and `slurmdb/job/<job_id>/` endpoints
@@ -19,21 +21,32 @@
   - [x] Modify `get_current_slurm_job_metadata_by_slurm_job_id` and similar fns to support RESTful calls in addition to SSH calls
   - [x] Test RESTful monitoring (submit job, query endpoints before and after state change)
 
+- [x] Refactor SSH and MongoDB connection code
+  - [x] Move SSH and MongoDB connection code out of constants/helpers and into seperate singleton classes
+  - [x] Modify `task_*` calls to SSH and MongoDB to use singleton connection
+
+- [ ] General
+  - [ ] Replace remaining print statements with logger calls and set level (DEBUG)
+  - [ ] Allow the task payload to pass in `name`, `cmd`, and `default_params` properties without need to customize `constants.py`
+
 - [ ] MongoDB database backup strategy
   - [ ] Definition
   - [ ] Implementation as part of Docker distribution
   - [ ] Test how app behaves if mongodb service is brought down
     - [ ] Decide how to report errors
 
-- [ ] General
-  - [ ] Replace remaining print statements with logger calls and set level (DEBUG)
-
 - [ ] Docker deployment #feat @alexpreynolds
   - [x] Modify Dockerfile and test w/o environment variables 2025-04-29
   - [x] Meet with Mike to go over Jenkins/Dockerhub integration 2025-04-30
   - [ ] Stage deployment on d3-staging
+    - [ ] Follow steps at https://altiusinstitute.slack.com/archives/D0B7HECUF/p1746556983503569 to pull in post-CI container
+    - [x] Build number is at https://altiusinstitute.slack.com/archives/D0B7HECUF/p1746557046066119
+    - [ ] Add conf.d entry at https://altiusinstitute.slack.com/archives/D0B7HECUF/p1746558487667099 
+    - [ ] Reload https://altiusinstitute.slack.com/archives/D0B7HECUF/p1746558613219829
+    - [ ] Test access to slurm-proxy host from within site network
   - [ ] Test stage with secrets
-    - [ ] Firewalling
+    - [x] Firewalling
     - [ ] JWT token
+  - [ ] Can we submit a job on behalf of test user (`slurmapitest`)?
   - [ ] How much disk space is available for logs?
     - [ ] Log rolling

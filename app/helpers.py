@@ -1,90 +1,21 @@
 # -*- coding: utf-8 -*-
 
-import os
 import sys
 import pymongo
-import paramiko
 from flask import (
     Response,
     json,
     stream_with_context,
 )
-from socket import gaierror
+from app.constants import (
+    MONGODB_URI,
+)
+from app.task_mongodb_client import MongoDBConnection
+
+mongodb_connection = MongoDBConnection()
 
 
-def ssh_client() -> paramiko.SSHClient:
-    """
-    Create an SSH client to connect to the SLURM scheduler.
-    This function uses the Paramiko library to create an SSH client
-    and sets the missing host key policy to automatically add the host key.
-
-    Returns:
-        paramiko.SSHClient: An SSH client object configured to connect to the SLURM scheduler.
-    """
-    ssh_client = paramiko.SSHClient()
-    ssh_client.load_system_host_keys()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    return ssh_client
-
-
-def ssh_client_exec(ssh_client: paramiko.SSHClient, cmd: str) -> tuple:
-    """
-    Execute a command on the SLURM scheduler via SSH. 
-    
-    The private key for the SSH connection is obtained via the SSH agent.
-
-    This function uses the provided SSH client to execute a command on
-    the SLURM scheduler and returns the output and error streams.
-
-    Args:
-        ssh_client (paramiko.SSHClient): The SSH client used to connect to the SLURM scheduler.
-        cmd (str): The command to be executed on the SLURM scheduler.
-
-    Returns:
-        tuple: A tuple containing the output and error streams of the executed command.
-    """
-    from app.constants import (
-        SSH_HOSTNAME,
-        SSH_USERNAME,
-        SSH_PRIVATE_KEY,
-    )
-
-    try:
-        ssh_client.connect(
-            hostname=SSH_HOSTNAME,
-            username=SSH_USERNAME,
-            pkey=SSH_PRIVATE_KEY,
-            look_for_keys=False,
-            allow_agent=False,
-            timeout=10,
-        )
-        return ssh_client.exec_command(cmd)
-    except gaierror as err:
-        print(f" * SSH connection failed: {err}", file=sys.stderr)
-        # print(f" * SSH_AUTH_SOCK={os.environ.get('SSH_AUTH_SOCK')}", file=sys.stderr)
-        # sys.exit(-1)
-    except paramiko.SSHException as err:
-        print(f" * SSH connection failed: {err}", file=sys.stderr)
-        # print(f" * SSH_AUTH_SOCK={os.environ.get('SSH_AUTH_SOCK')}", file=sys.stderr)
-        sys.exit(-1)
-    except paramiko.AuthenticationException as err:
-        print(f" * SSH authentication failed: {err}", file=sys.stderr)
-        sys.exit(-1)
-
-
-def init_mongodb() -> None:
-    """
-    Initialize the MongoDB client and ping it to check if it is connected.
-    """
-    from app.constants import (
-        MONGODB_CLIENT,
-        MONGODB_URI,
-    )
-
-    ping_mongodb_client(MONGODB_CLIENT, MONGODB_URI)
-
-
-def ping_mongodb_client(client: pymongo.MongoClient, uri: str) -> None:
+def ping_mongodb_client(client: pymongo.MongoClient = mongodb_connection.get_client(), uri: str = MONGODB_URI) -> None:
     """
     Ping the MongoDB client to check if it is connected.
     This function attempts to ping the MongoDB client and raises an exception

@@ -12,8 +12,6 @@ from flask import (
     request,
 )
 from app.helpers import (
-    ssh_client,
-    ssh_client_exec,
     stream_json_response,
 )
 from app.constants import (
@@ -22,6 +20,7 @@ from app.constants import (
     SLURM_REST_JWT_EXPIRATION_TIME,
     SLURM_REST_GENERIC_USERNAME,
 )
+from app.task_ssh_client import SSHClientConnection
 from typing import TypedDict
 from typing_extensions import Unpack
 from collections.abc import Callable
@@ -33,7 +32,7 @@ from jwt.jwk import jwk_from_dict
 https://slurm.schedmd.com/SLUG23/REST-API-SLUG23.pdf
 """
 
-SSH_CLIENT = ssh_client()
+ssh_connection = SSHClientConnection()
 
 class QueryParams(TypedDict, total=False):
     """
@@ -140,15 +139,21 @@ def get_job_info_for_job_id_via_params(job_id: int, username: str) -> Response:
     slurm_rest_auth_token = get_slurm_rest_jwt_token_for_username(username)
     if not slurm_rest_auth_token:
         print(" * Error: Failed to retrieve SLURM REST auth token", file=sys.stderr)
-        return stream_json_response({"error": "Failed to retrieve SLURM REST auth token"}, 400), query_url
+        return stream_json_response({"error": "Failed to retrieve SLURM REST auth token"}, 400), 400, query_url
     headers = {
         'X-SLURM-USER-TOKEN': slurm_rest_auth_token,
     }    
     response = requests.request(endpoint_method, query_url, headers=headers)
     if response.status_code != 200:
         print(f" * Error: {response.status_code} - {response.text}", file=sys.stderr)
-        return None
-    return response.json(), query_url
+    response_content = ''
+    for chunk in response.iter_content(chunk_size=None):
+        response_content += chunk.decode('utf-8')
+    try:
+        response_json_content = json.loads(response_content)
+    except json.JSONDecodeError as err:
+        print(f" * Error: JSON decoding failed - {err}", file=sys.stderr)
+    return response_json_content, response.status_code, query_url
 
 
 @task_slurm_rest.route("/job/submit/", methods=["POST"])
@@ -244,9 +249,12 @@ def get_slurm_rest_jwt_private_key_via_env() -> str:
 
 
 def get_slurm_rest_jwt_token_for_username(username: str) -> str:
-    if not username or username == SLURM_REST_GENERIC_USERNAME:
-        print(f" * Error: Invalid username provided: {username}", file=sys.stderr)
-        return None
+    # if not username or username == SLURM_REST_GENERIC_USERNAME:
+    #     print(f" * Error: Invalid username provided: {username}", file=sys.stderr)
+    #     return None
+    if not username:
+        print(f" * Warning: Username not provided", file=sys.stderr)
+        username = SLURM_REST_GENERIC_USERNAME
     priv_key = get_slurm_rest_jwt_private_key_via_env()
     if not priv_key:
         print(" * Error: Failed to retrieve SLURM JWT private key", file=sys.stderr)
@@ -262,7 +270,7 @@ def get_slurm_rest_jwt_token_for_username(username: str) -> str:
     }
     a = JWT()
     compact_jws = a.encode(message, signing_key, alg='HS256')
-    # print(f" * SLURM_JWT={compact_jws}", file=sys.stderr)
+    print(f" * SLURM_JWT={compact_jws} | username={username}", file=sys.stderr)
     return compact_jws
 
 
@@ -281,7 +289,7 @@ def get_slurm_rest_jwt_token_via_cli(username: str) -> str:
 def get_slurm_rest_jwt_token_via_ssh(username: str) -> str:
     cmd = get_slurm_rest_jwt_token_cmd(username)
     print(f" * Executing command: {cmd}", file=sys.stderr)
-    (stdin, stdout, stderr) = ssh_client_exec(SSH_CLIENT, cmd)
+    (stdin, stdout, stderr) = ssh_connection.ssh_client_exec(cmd)
     try:
         slurm_rest_token = stdout.read().decode("utf-8")
         return slurm_rest_token.strip()
@@ -319,7 +327,7 @@ def query_slurm_endpoint_via_ssh(slurm_rest_auth_token: str, endpoint_url: str, 
     query_url = get_slurm_rest_query(endpoint_url, endpoint_key, **kwargs)
     # print(f" * Querying SLURM endpoint: {endpoint_key} -> {query_url}", file=sys.stderr)
     cmd = f"curl -vs -k -vvvv -H X-SLURM-USER-TOKEN:{slurm_rest_auth_token} -X {endpoint_method} '{query_url}'"
-    (stdin, stdout, stderr) = ssh_client_exec(SSH_CLIENT, cmd)
+    (stdin, stdout, stderr) = ssh_connection.ssh_client_exec(cmd)
     try:
         slurm_rest_diag = stdout.read().decode("utf-8")
         return json.loads(slurm_rest_diag), query_url

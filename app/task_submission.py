@@ -2,15 +2,12 @@
 
 import os
 import sys
-import json
 from flask import (
     Blueprint,
     request,
     Response,
 )
 from app.helpers import (
-    ssh_client,
-    ssh_client_exec,
     stream_json_response,
     get_dict_from_streamed_json_response,
 )
@@ -21,9 +18,12 @@ from app.constants import (
     SlurmCommunicationMethods,
 )
 from app.task_monitoring import monitor_new_slurm_job
+from app.task_ssh_client import SSHClientConnection
 
-SSH_CLIENT = ssh_client()
+ssh_connection = SSHClientConnection()
+
 SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.REST
+# SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.SSH
 
 task_submission = Blueprint("task_submission", __name__)
 
@@ -35,7 +35,6 @@ information about the task to be submitted, including directories for input,
 output, and error files, as well as SLURM parameters and the task name and
 its parameters.
 """
-
 
 @task_submission.route("/", methods=["POST"])
 def post() -> Response:
@@ -195,7 +194,7 @@ def submit_slurm_job_via_ssh(task: dict) -> int:
         print(" * Failed to define sbatch command; validate task parameters", file=sys.stderr)
         return BAD_SLURM_JOB_ID
     try:
-        (stdin, stdout, stderr) = ssh_client_exec(SSH_CLIENT, cmd)
+        (stdin, stdout, stderr) = ssh_connection.ssh_client_exec(cmd)
         # use of '--parsable' option in sbatch command means that
         # the job id (integer) is the only thing sent to standard output
         job_id = int(stdout.read().decode("utf-8"))

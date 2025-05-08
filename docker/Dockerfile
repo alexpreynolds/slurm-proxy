@@ -8,7 +8,7 @@ RUN echo 'http://dl-cdn.alpinelinux.org/alpine/v3.9/main' >> /etc/apk/repositori
 RUN echo 'http://dl-cdn.alpinelinux.org/alpine/v3.9/community' >> /etc/apk/repositories
 RUN apk add --update --no-cache --virtual .tmp-build-deps \
     gcc libc-dev linux-headers postgresql-dev mongodb mongodb-tools openssh \
-    nginx supervisor && apk add libffi-dev
+    nginx supervisor gettext traceroute curl && apk add libffi-dev
 
 # Install WireGuard and iptables
 RUN apk add --no-cache wireguard-tools iptables ip6tables envsubst

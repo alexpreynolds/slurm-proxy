@@ -15,7 +15,7 @@ from app.constants import (
     MONITOR_POLLING_INTERVAL,
 )
 from app.helpers import (
-    init_mongodb,
+    ping_mongodb_client,
 )
 
 def create_app():
@@ -35,6 +35,7 @@ def create_app():
         raise ValueError("SLURM_JWT_HS256_KEY_BASE64 environment variable not set")
 
     app = Flask(APP_NAME)
+
     # app.config.from_object('app.config.Config')
     # logging.config.dictConfig(app.config['LOGGING_CONFIG'])
 
@@ -47,7 +48,7 @@ def create_app():
         return "pong"
     
     with app.app_context():
-        init_mongodb()
+        ping_mongodb_client()
         scheduler = BackgroundScheduler()
         poll_scheduler = scheduler.add_job(
             poll_slurm_jobs,

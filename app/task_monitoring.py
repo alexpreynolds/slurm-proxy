@@ -21,13 +21,13 @@ from app.constants import (
     TASK_METADATA,
     SlurmCommunicationMethods
 )
-from app.task_mongodb_client import MongoDBConnection
 from app.task_notification import NotificationCallbacks
-from app.task_ssh_client import SSHClientConnection
+from app.task_ssh_client import ssh_client_connection_singleton
+from app.task_mongodb_client import mongodb_connection_singleton
 
 
-ssh_connection = SSHClientConnection()
-mongodb_connection = MongoDBConnection()
+ssh_connection = ssh_client_connection_singleton
+mongodb_connection = mongodb_connection_singleton
 
 SLURM_STATES_ALLOWED = SLURM_STATE.keys()
 SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.REST
@@ -41,7 +41,7 @@ a MongoDB database and communicates with a SLURM scheduler to generate updated j
 """
 
 
-@task_monitoring.route("/", methods=["POST"])
+@task_monitoring.route("/", methods=["POST"], strict_slashes=False)
 def post() -> Response:
     """
     POST request to add a new job to the monitor database.
@@ -59,7 +59,7 @@ def post() -> Response:
     return response
 
 
-@task_monitoring.route("/slurm_job_id/<slurm_job_id>", methods=["GET"])
+@task_monitoring.route("/slurm_job_id/<slurm_job_id>", methods=["GET"], strict_slashes=False)
 def get_job_metadata_by_slurm_job_id(slurm_job_id: str) -> Response:
     """
     GET request to retrieve job metadata from the monitor database using the SLURM job ID.
@@ -107,7 +107,7 @@ def get_job_metadata_by_slurm_job_id(slurm_job_id: str) -> Response:
     return response
 
 
-@task_monitoring.route("/slurm_job_state/<slurm_job_state>", methods=["GET"])
+@task_monitoring.route("/slurm_job_state/<slurm_job_state>", methods=["GET"], strict_slashes=False)
 def get_by_slurm_job_state(slurm_job_state: str) -> Response:
     """
     GET request to retrieve job metadata from the monitor database using the SLURM job state.
@@ -127,7 +127,7 @@ def get_by_slurm_job_state(slurm_job_state: str) -> Response:
     return response
 
 
-@task_monitoring.route("/slurm_job_id/<slurm_job_id>", methods=["DELETE"])
+@task_monitoring.route("/slurm_job_id/<slurm_job_id>", methods=["DELETE"], strict_slashes=False)
 def delete_by_slurm_job_id(slurm_job_id: int) -> Response:
     """
     DELETE request to remove a job from the monitor database using the SLURM job ID.
@@ -609,7 +609,7 @@ def process_job_state_change(
                 msg = f"Sending test notification for: {slurm_job_id}!"
                 for method in task_notification_methods:
                     # print(f" * Sending notification message via method {method}", file=sys.stderr)
-                    if method == NotificationCallbacks.EMAIL:
+                    if method == NotificationCallbacks.EMAIL or method == NotificationCallbacks.GMAIL:
                         sender = task_notification_params["email"]["sender"]
                         recipient = task_notification_params["email"]["recipient"]
                         subject = task_notification_params["email"]["subject"]

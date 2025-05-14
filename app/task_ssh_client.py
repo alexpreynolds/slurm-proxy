@@ -89,3 +89,5 @@ class SSHClientConnection:
         print(f" * SSH_USERNAME={os.environ.get('SSH_USERNAME', SSH_USERNAME)}", file=sys.stderr)
         print(f" * SSH_PRIVATE_KEY={os.environ.get('SSH_PRIVATE_KEY', SSH_PRIVATE_KEY)}", file=sys.stderr)
         print(f" * SSH_AUTH_SOCK={os.environ.get('SSH_AUTH_SOCK')}", file=sys.stderr)
+
+ssh_client_connection_singleton = SSHClientConnection()

@@ -20,7 +20,7 @@ from app.constants import (
     SLURM_REST_JWT_EXPIRATION_TIME,
     SLURM_REST_GENERIC_USERNAME,
 )
-from app.task_ssh_client import SSHClientConnection
+from app.task_ssh_client import ssh_client_connection_singleton
 from typing import TypedDict
 from typing_extensions import Unpack
 from collections.abc import Callable
@@ -32,7 +32,7 @@ from jwt.jwk import jwk_from_dict
 https://slurm.schedmd.com/SLUG23/REST-API-SLUG23.pdf
 """
 
-ssh_connection = SSHClientConnection()
+ssh_connection = ssh_client_connection_singleton
 
 class QueryParams(TypedDict, total=False):
     """
@@ -47,7 +47,7 @@ class QueryParams(TypedDict, total=False):
 task_slurm_rest = Blueprint("task_slurm_rest", __name__)
 
 
-@task_slurm_rest.route("/diag/", methods=["GET"])
+@task_slurm_rest.route("/diag/", methods=["GET"], strict_slashes=False)
 def get_diag() -> Response:
     """
     GET request handler for SLURM diag information.
@@ -69,7 +69,7 @@ def get_diag() -> Response:
     )
 
 
-@task_slurm_rest.route("/jobs/<int:update_time>", methods=["GET"])
+@task_slurm_rest.route("/jobs/<int:update_time>", methods=["GET"], strict_slashes=False)
 def get_list_of_jobs(update_time: int) -> Response:
     """
     GET request handler for SLURM jobs information updated since update_time.
@@ -94,7 +94,7 @@ def get_list_of_jobs(update_time: int) -> Response:
     )
 
 
-@task_slurm_rest.route("/job/<int:job_id>/", methods=["GET"])
+@task_slurm_rest.route("/job/<int:job_id>/", methods=["GET"], strict_slashes=False)
 def get_job_info_for_job_id(job_id: int) -> Response:
     """
     GET request handler for SLURM job information.
@@ -156,7 +156,7 @@ def get_job_info_for_job_id_via_params(job_id: int, username: str) -> Response:
     return response_json_content, response.status_code, query_url
 
 
-@task_slurm_rest.route("/job/submit/", methods=["POST"])
+@task_slurm_rest.route("/job/submit/", methods=["POST"], strict_slashes=False)
 def submit_job() -> Response:
     """
     POST request handler for submitting a job to SLURM.
@@ -270,7 +270,7 @@ def get_slurm_rest_jwt_token_for_username(username: str) -> str:
     }
     a = JWT()
     compact_jws = a.encode(message, signing_key, alg='HS256')
-    print(f" * SLURM_JWT={compact_jws} | username={username}", file=sys.stderr)
+    # print(f" * SLURM_JWT={compact_jws} | username={username}", file=sys.stderr)
     return compact_jws
 
 

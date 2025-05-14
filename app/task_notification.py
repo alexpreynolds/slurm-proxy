@@ -11,6 +11,11 @@ class NotificationCallbacks(Enum):
             sender, recipient, subject, body
         )
     )
+    GMAIL = partial(
+        lambda sender, recipient, subject, body: NotificationMethods.notify_via_gmail(
+            sender, recipient, subject, body
+        )
+    )
     RABBITMQ = partial(
         lambda queue, exchange, routing_key, body: NotificationMethods.notify_via_rabbitmq(
             queue, exchange, routing_key, body
@@ -74,6 +79,66 @@ class NotificationMethods:
                 server.sendmail(sender, recipient, message.as_string())
         except Exception as err:
             print(f" * Failed to send email: {err}", file=sys.stderr)
+
+    @staticmethod
+    def notify_via_gmail(sender, recipient, subject, body):
+        """
+        Sends a Gmail notification.
+
+        Args:
+            sender (str): The sender's email address.
+            recipient (str): The recipient's email address.
+            subject (str): The subject of the email.
+            body (str): The body of the email.
+        """
+        print(
+            f" * Sending Gmail to {recipient} with subject '{subject}' and body '{body}'"
+        )
+        import re
+        import base64
+        from email.message import EmailMessage
+        from google.auth import load_credentials_from_file
+        from googleapiclient.discovery import build
+        from googleapiclient.errors import HttpError
+        from app.constants import (
+            NOTIFICATIONS_GMAIL_CREDENTIALS_PATH,
+        )
+
+        email_pattern = r"^\S+@\S+\.\S+$"
+        if not re.match(email_pattern, sender):
+            print(" * Error: Invalid sender email address.", file=sys.stderr)
+            return
+        if not re.match(email_pattern, recipient):
+            print(" * Error: Invalid recipient email address.", file=sys.stderr)
+            return
+        if not subject or subject.strip() == "":
+            print(" * Error: Invalid email subject.", file=sys.stderr)
+            return
+        if not body or body.strip() == "":
+            print(" * Error: Invalid email body.", file=sys.stderr)
+            return
+
+        credentials, _ = load_credentials_from_file(NOTIFICATIONS_GMAIL_CREDENTIALS_PATH)
+
+        try:
+            service = build("gmail", "v1", credentials=credentials)
+            message = EmailMessage()
+            message.set_content(body)
+            message["To"] = recipient
+            message["From"] = sender
+            message["Subject"] = subject
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+            create_message = {"message": {"raw": raw_message}}
+            send_message = (
+                service.users()
+                .messages()
+                .send(userId="me", body=create_message)
+                .execute()
+            )
+            print(f" * Gmail sent successfully: {send_message['id']}", file=sys.stderr)
+        except HttpError as err:
+            print(f" * Gmail error occurred: {err}", file=sys.stderr)
+            send_message = None
 
     @staticmethod
     def notify_via_rabbitmq(

@@ -29,6 +29,12 @@ RUN mkdir -p /data/db && \
 VOLUME /data/db
 EXPOSE 27017
 
+# Set up default timezone
+ENV TZ UTC
+RUN apk add --no-cache tzdata && \
+    cp /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone
+
 # Create WireGuard configuration directory
 RUN mkdir -p /etc/wireguard
 
@@ -48,4 +54,4 @@ COPY ../docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/usr/bin/supervisord"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

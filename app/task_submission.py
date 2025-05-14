@@ -18,9 +18,9 @@ from app.constants import (
     SlurmCommunicationMethods,
 )
 from app.task_monitoring import monitor_new_slurm_job
-from app.task_ssh_client import SSHClientConnection
+from app.task_ssh_client import ssh_client_connection_singleton
 
-ssh_connection = SSHClientConnection()
+ssh_connection = ssh_client_connection_singleton
 
 SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.REST
 # SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.SSH
@@ -36,7 +36,7 @@ output, and error files, as well as SLURM parameters and the task name and
 its parameters.
 """
 
-@task_submission.route("/", methods=["POST"])
+@task_submission.route("/", methods=["POST"], strict_slashes=False)
 def post() -> Response:
     """
     POST request handler for task submission.
@@ -44,6 +44,8 @@ def post() -> Response:
     validates the task, and submits it to the SLURM scheduler.
     """
     request_info = request.get_json(force=True)
+    if not request_info:
+        return stream_json_response({"error": "Invalid JSON format"}, 400)
     task = request_info.get("task")
     if not task:
         return stream_json_response({"error": "No task provided"}, 400)
@@ -165,8 +167,11 @@ def define_task_cmd(task_name: str, task_cmd: str, additional_task_params: list)
     if task_name not in TASK_METADATA:
         print(f" * Task {task_name} is invalid", file=sys.stderr)
         return None
-    cmd = [task_cmd if task_cmd else TASK_METADATA[task_name]["cmd"]]
-    for default_param in TASK_METADATA[task_name]["default_params"]:
+    cmd = [task_cmd if task_cmd else TASK_METADATA[task_name].get("cmd", None)]
+    if not cmd[0]:
+        print(f" * Task command for {task_name} is unspecified", file=sys.stderr)
+        return None
+    for default_param in TASK_METADATA[task_name].get("default_params", []):
         cmd.append(default_param)
     for additional_param in additional_task_params:
         cmd.append(additional_param)
@@ -297,7 +302,7 @@ def get_main_slurm_rest_payload_for_task(task: dict, preliminary_job_id: int) ->
         # parent_dir = dir_comps["parent"]
         output_dir = dir_comps["output"]
         error_dir = dir_comps["error"]
-        task_cmd = define_task_cmd(task["name"], task.get("cmd", None), task["params"])
+        task_cmd = define_task_cmd(task["name"], task.get("cmd", None), task.get("params", []))
         slurm_cmd = f"#!/bin/bash\nsrun /bin/bash -c \'{task_cmd};\'"
         slurm_obj = {
             "username": task["username"],
@@ -361,6 +366,8 @@ def get_preliminary_slurm_rest_payload_for_task(task: dict) -> dict:
                 "cpus_per_task": 1,
                 "memory_per_cpu": { "set": True, "number": 100 },
                 "time_limit": { "set": True, "number": 100 },
+                "standard_output": "/dev/null",
+                "standard_error": "/dev/null",
             },
         }
         # print(f" * SLURM preliminary payload: {slurm_obj}", file=sys.stderr)

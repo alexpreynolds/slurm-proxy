@@ -25,3 +25,9 @@ jwt==1.3.1
 requests==2.32.3
 requests-toolbelt==0.9.1
 typing_extensions==4.2.0
+google-api-core==2.24.2
+google-api-python-client==2.169.0
+google-auth==2.40.1
+google-auth-httplib2==0.2.0
+google-i18n-address==3.1.0
+googleapis-common-protos==1.70.0

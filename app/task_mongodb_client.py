@@ -39,3 +39,5 @@ class MongoDBConnection:
 
     def get_monitor_jobs_collection(self):
         return self._monitor_db["jobs"]
+    
+mongodb_connection_singleton = MongoDBConnection()

@@ -9,8 +9,16 @@ from app.task_notification import NotificationCallbacks
 """
 Application name and port
 """
-APP_NAME = os.environ.get("NAME", "slurm-proxy")
-APP_PORT = os.environ.get("PORT", 5001)
+APP_NAME = os.environ.get("FLASK_APP_NAME", "slurm-proxy")
+APP_PORT = os.environ.get("FLASK_APP_PORT", 5001)
+APP_HOST = os.environ.get("FLASK_APP_HOST", "0.0.0.0")
+APP_DEBUG_MODE = os.environ.get("FLASK_APP_DEBUG_MODE", True)
+APP_USE_RELOADER = os.environ.get("FLASK_APP_USE_RELOADER", True)
+
+if isinstance(APP_DEBUG_MODE, str): 
+    APP_DEBUG_MODE = True if APP_DEBUG_MODE.lower() in ("true", "1", "yes") else False
+if isinstance(APP_USE_RELOADER, str):
+    APP_USE_RELOADER = True if APP_USE_RELOADER.lower() in ("true", "1", "yes") else False
 
 """
 These parameters are used to define the tasks that can be submitted to the SLURM scheduler
@@ -60,15 +68,18 @@ TASK_METADATA = {
             },
         },
     },
+    "generic_task": {
+        "description": "A generic task that can be used to run any command.",
+        "notification": {
+            "methods": [
+                NotificationCallbacks.TEST,
+            ],
+            "params": {
+                "test": None,
+            },
+        },
+    }
 }
-
-"""
-SLURM job submission methods
-"""
-
-class SlurmCommunicationMethods(Enum):
-    SSH = 1
-    REST = 2
 
 """
 RabbitMQ connection parameters
@@ -99,6 +110,15 @@ NOTIFICATIONS_SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.example.com")
 NOTIFICATIONS_SMTP_PORT = os.environ.get("SMTP_PORT", 587)
 NOTIFICATIONS_SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "username@example.com")
 NOTIFICATIONS_SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "api_token")
+
+"""
+Gmail service parameters
+
+Authentication credentials should be created for the Gmail API. The credentials should be
+downloaded as a JSON file and the path to the file should be set in the environment variable
+GMAIL_CREDENTIALS_PATH.
+"""
+NOTIFICATIONS_GMAIL_CREDENTIALS_PATH = os.environ.get("GMAIL_CREDENTIALS_PATH", "gmail.credentials.json")
 
 """
 Slack service parameters
@@ -266,3 +286,11 @@ SLURM_REST_SLURM_ENDPOINT_URL = os.environ.get("SLURM_REST_URL", f"{SLURM_REST_H
 SLURM_REST_SLURMDB_ENDPOINT_URL = os.environ.get("SLURM_REST_URL", f"{SLURM_REST_HOST}/slurmdb/v{SLURM_REST_API_DATA_PARSER_PLUGIN_VERSION}")
 SLURM_REST_JWT_EXPIRATION_TIME = int(os.environ.get("SLURM_REST_JWT_EXPIRATION_TIME", 10))
 SLURM_REST_GENERIC_USERNAME = "generic"
+
+"""
+SLURM job submission methods
+"""
+
+class SlurmCommunicationMethods(Enum):
+    SSH = 1
+    REST = 2

@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
 from flask import (
     Blueprint,
     request,
     Response,
+    Flask,
 )
 from app.helpers import (
     stream_json_response,
     get_dict_from_streamed_json_response,
 )
 from app.constants import (
+    APP_NAME,
     TASK_METADATA,
     BAD_SLURM_JOB_ID,
     SLURM_STATE_UNKNOWN,
@@ -23,9 +24,9 @@ from app.task_ssh_client import ssh_client_connection_singleton
 ssh_connection = ssh_client_connection_singleton
 
 SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.REST
-# SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.SSH
 
 task_submission = Blueprint("task_submission", __name__)
+app = Flask(APP_NAME)
 
 """
 This module defines a Flask blueprint for task submission. 
@@ -36,6 +37,7 @@ output, and error files, as well as SLURM parameters and the task name and
 its parameters.
 """
 
+
 @task_submission.route("/", methods=["POST"], strict_slashes=False)
 def post() -> Response:
     """
@@ -45,14 +47,20 @@ def post() -> Response:
     """
     request_info = request.get_json(force=True)
     if not request_info:
+        app.logger.error(f"No JSON data received for job submission")
         return stream_json_response({"error": "Invalid JSON format"}, 400)
     task = request_info.get("task")
     if not task:
+        app.logger.error(f"JSON data received for job submission does not contain task")
         return stream_json_response({"error": "No task provided"}, 400)
     if not is_task_valid(task):
+        app.logger.error(
+            f"JSON data received for job submission does not contain a valid task description"
+        )
         return stream_json_response({"error": "Invalid task format"}, 400)
     submit_job_id = submit_slurm_job(task, SLURM_COMMUNICATION_METHOD)
     if submit_job_id == BAD_SLURM_JOB_ID:
+        app.logger.error(f"Could not submit task to monitor and/or SLURM scheduler")
         return stream_json_response({"error": "Failed to submit task"}, 400)
     # if successful, submit job metadata to the monitor service
     job = {
@@ -61,9 +69,12 @@ def post() -> Response:
         "task": task,
     }
     if not monitor_new_slurm_job(job):
+        app.logger.error(f"Failed to monitor job")
         return stream_json_response({"error": "Failed to monitor job"}, 400)
     # return the task uuid back to the client
-    return stream_json_response({"uuid": task["uuid"], "slurm_job_id": submit_job_id}, 200)
+    return stream_json_response(
+        {"uuid": task["uuid"], "slurm_job_id": submit_job_id}, 200
+    )
 
 
 def submit_slurm_job(task: dict, submit_method: str) -> int:
@@ -91,7 +102,7 @@ def submit_slurm_job(task: dict, submit_method: str) -> int:
         job_id = submit_slurm_job_via_rest(task)
         return job_id
     else:
-        print(f" * Unsupported task submit method: {submit_method}", file=sys.stderr)
+        app.logger.error(f"Unsupported task submit method: {submit_method}")
         return BAD_SLURM_JOB_ID
 
 
@@ -137,7 +148,7 @@ def define_sbatch_cmd_for_task_via_ssh(task: dict) -> str:
     slurm_cmd_comps.append(f"--partition={slurm_comps['partition']}")
     if slurm_comps["time"]:
         slurm_cmd_comps.append(f"--time={slurm_comps['time']}")
-    task_cmd = define_task_cmd(task["name"], task.get('cmd', None), task["params"])
+    task_cmd = define_task_cmd(task["name"], task.get("cmd", None), task["params"])
     if not task_cmd:
         return None
     slurm_cmd_comps.append(f"--wrap='{task_cmd}'")
@@ -145,7 +156,7 @@ def define_sbatch_cmd_for_task_via_ssh(task: dict) -> str:
     cmd_comps.append(slurm_cmd)
     # construct and return the full set of commands
     cmd = " ; ".join(cmd_comps)
-    # print(f" * sbatch command: {cmd}", file=sys.stderr)
+    # app.logger.debug(f" * Debug: {current_filename} | sbatch command: {cmd}")
     return cmd
 
 
@@ -165,11 +176,11 @@ def define_task_cmd(task_name: str, task_cmd: str, additional_task_params: list)
         str: The full command for the task, or None if the task is not defined.
     """
     if task_name not in TASK_METADATA:
-        print(f" * Task {task_name} is invalid", file=sys.stderr)
+        app.logger.error(f"Task {task_name} is invalid")
         return None
     cmd = [task_cmd if task_cmd else TASK_METADATA[task_name].get("cmd", None)]
     if not cmd[0]:
-        print(f" * Task command for {task_name} is unspecified", file=sys.stderr)
+        app.logger.error(f"Task command for {task_name} is unspecified")
         return None
     for default_param in TASK_METADATA[task_name].get("default_params", []):
         cmd.append(default_param)
@@ -196,7 +207,8 @@ def submit_slurm_job_via_ssh(task: dict) -> int:
     """
     cmd = define_sbatch_cmd_for_task_via_ssh(task)
     if not cmd:
-        print(" * Failed to define sbatch command; validate task parameters", file=sys.stderr)
+        # print(" * Failed to define sbatch command; validate task parameters", file=sys.stderr)
+        app.logger.error(f"Failed to define sbatch command; validate task parameters")
         return BAD_SLURM_JOB_ID
     try:
         (stdin, stdout, stderr) = ssh_connection.ssh_client_exec(cmd)
@@ -206,10 +218,10 @@ def submit_slurm_job_via_ssh(task: dict) -> int:
         # if there is any output sent to standard error, log it as a failure
         stderr_val = stderr.read().decode("utf-8")
         if stderr_val:
-            print(f" * Failed sbatch submit: {stderr_val}", file=sys.stderr)
+            app.logger.error(f"Failed sbatch submit: {stderr_val}")
             return BAD_SLURM_JOB_ID
     except ValueError as err:
-        print(f" * Error: submit_slurm_job_via_ssh - {err}", file=sys.stderr)
+        app.logger.error(f"submit_slurm_job_via_ssh - {err}")
         return BAD_SLURM_JOB_ID
     return job_id
 
@@ -222,7 +234,7 @@ def submit_slurm_job_via_rest(task: dict) -> int:
     request, which generates directories for input, output, and error files. The
     job id that results is used as a dependency for the actual (main) job.
 
-    This function then constructs the equivalent sbatch command using the 
+    This function then constructs the equivalent sbatch command using the
     parameters provided in the task dictionary and sends it to the SLURM
     scheduler via REST API.
 
@@ -238,44 +250,49 @@ def submit_slurm_job_via_rest(task: dict) -> int:
 
     preliminary_payload = get_preliminary_slurm_rest_payload_for_task(task)
     if not preliminary_payload:
-        print(" * Failed to define preliminary REST payload for submission; validate task parameters", file=sys.stderr)
+        # print(" * Failed to define preliminary REST payload for submission; validate task parameters", file=sys.stderr)
+        app.logger.error(
+            f"Failed to define preliminary REST payload for submission; validate task parameters"
+        )
         return BAD_SLURM_JOB_ID
-    # print(f" * SLURM preliminary payload: {preliminary_payload}", file=sys.stderr)
     preliminary_response = submit_job_via_params(preliminary_payload)
     if preliminary_response.status_code != 200:
         try:
             preliminary_response_text = preliminary_response.text
-            print(f" * Error: {preliminary_response.status_code} - Preliminary submit step failed - {preliminary_response_text}", file=sys.stderr)
+            app.logger.error(
+                f"{preliminary_response.status_code} - Preliminary submit step failed - {preliminary_response_text}"
+            )
             return BAD_SLURM_JOB_ID
         except AttributeError as err:
-            print(f" * Error: {preliminary_response.status_code} - Preliminary submit step failed - {err}", file=sys.stderr)
+            app.logger.error(
+                f"{preliminary_response.status_code} - Preliminary submit step failed - {err}"
+            )
             return BAD_SLURM_JOB_ID
     response = get_dict_from_streamed_json_response(preliminary_response)
-    preliminary_job_id = response['response'].get('job_id', BAD_SLURM_JOB_ID)
+    preliminary_job_id = response["response"].get("job_id", BAD_SLURM_JOB_ID)
 
     if preliminary_job_id == BAD_SLURM_JOB_ID:
-        print(f" * Error: Failed to create preliminary job - {response}", file=sys.stderr)
+        app.logger.error(f"Failed to create preliminary job - {response}")
         return BAD_SLURM_JOB_ID
 
-    # print(f" * SLURM preliminary job id: {preliminary_job_id}", file=sys.stderr)
-    
     # construct the command payload for the main job
     main_payload = get_main_slurm_rest_payload_for_task(task, preliminary_job_id)
     if not main_payload:
-        print(" * Failed to define main REST payload for submission; validate task parameters", file=sys.stderr)
+        app.logger.error(
+            f"Failed to define main REST payload for submission; validate task parameters"
+        )
         return BAD_SLURM_JOB_ID
-    # print(f" * SLURM main payload: {main_payload}", file=sys.stderr)
     main_response = submit_job_via_params(main_payload)
     if main_response.status_code != 200:
-        print(f" * Error: {main_response.status_code} - {main_response.text}", file=sys.stderr)
+        app.logger.error(
+            f"get_main_slurm_rest_payload_for_task: {main_response.status_code} - {main_response.text}"
+        )
         return BAD_SLURM_JOB_ID
     response = get_dict_from_streamed_json_response(main_response)
-    main_job_id = response['response'].get('job_id', BAD_SLURM_JOB_ID)
-    if main_job_id == BAD_SLURM_JOB_ID: 
-        print(f" * Error: Failed to create main job - {response}", file=sys.stderr)
+    main_job_id = response["response"].get("job_id", BAD_SLURM_JOB_ID)
+    if main_job_id == BAD_SLURM_JOB_ID:
+        app.logger.error(f"Failed to create main job - {response}")
         return BAD_SLURM_JOB_ID
-    
-    # print(f" * SLURM main job id: {main_job_id}", file=sys.stderr)
 
     # main_job_id is what needs to be returned to the client for monitoring
     return main_job_id
@@ -294,7 +311,7 @@ def get_main_slurm_rest_payload_for_task(task: dict, preliminary_job_id: int) ->
         preliminary_job_id (int): The job ID of the preliminary job that was created
             to create the necessary directories.
 
-    Returns:  
+    Returns:
         dict: The payload for the SLURM RESTful request.
     """
     try:
@@ -302,28 +319,30 @@ def get_main_slurm_rest_payload_for_task(task: dict, preliminary_job_id: int) ->
         # parent_dir = dir_comps["parent"]
         output_dir = dir_comps["output"]
         error_dir = dir_comps["error"]
-        task_cmd = define_task_cmd(task["name"], task.get("cmd", None), task.get("params", []))
-        slurm_cmd = f"#!/bin/bash\nsrun /bin/bash -c \'{task_cmd};\'"
+        task_cmd = define_task_cmd(
+            task["name"], task.get("cmd", None), task.get("params", [])
+        )
+        slurm_cmd = f"#!/bin/bash\nsrun /bin/bash -c '{task_cmd};'"
         slurm_obj = {
             "username": task["username"],
             "job": {
                 "script": slurm_cmd,
-                "environment": [ "PATH=/bin/:/usr/bin/:/sbin/" ],
+                "environment": ["PATH=/bin/:/usr/bin/:/sbin/"],
                 "current_working_directory": f"{task['cwd']}",
                 "name": f"hpc-proxy-{task['name']}-{task['uuid']}-main",
                 "partition": task["slurm"]["partition"],
                 "cpus_per_task": task["slurm"]["cpus_per_task"],
-                "memory_per_cpu": { "set": True, "number": task["slurm"]["mem"] },
-                "time_limit": { "set": True, "number": task["slurm"]["time"] },
+                "memory_per_cpu": {"set": True, "number": task["slurm"]["mem"]},
+                "time_limit": {"set": True, "number": task["slurm"]["time"]},
                 "standard_output": f'{output_dir}/{task["slurm"]["output"]}',
                 "standard_error": f'{error_dir}/{task["slurm"]["error"]}',
                 "dependency": f"afterok:{preliminary_job_id}",
             },
         }
-        # print(f" * SLURM main payload: {slurm_obj}", file=sys.stderr)
+        # app.logger.debug(f"SLURM main payload: {slurm_obj}")
         return slurm_obj
     except KeyError as err:
-        print(f" * Error: Missing keys from task - {task} - {err}", file=sys.stderr)
+        app.logger.error(f"Missing keys from task - {task} - {err}")
         return None
 
 
@@ -338,10 +357,10 @@ def get_preliminary_slurm_rest_payload_for_task(task: dict) -> dict:
         task (dict): The task dictionary containing information about the task
             to be submitted.
 
-    Returns:  
+    Returns:
         dict: The payload for the SLURM RESTful request.
     """
-    
+
     try:
         dir_comps = task["dirs"]
         parent_dir = dir_comps["parent"]
@@ -354,26 +373,26 @@ def get_preliminary_slurm_rest_payload_for_task(task: dict) -> dict:
         mkdir_cmds.append(f"mkdir -p {output_dir}")
         mkdir_cmds.append(f"mkdir -p {error_dir}")
         mkdir_cmd = " ; ".join(mkdir_cmds)
-        slurm_cmd = f"#!/bin/bash\nsrun /bin/bash -c \'{mkdir_cmd};\'"
+        slurm_cmd = f"#!/bin/bash\nsrun /bin/bash -c '{mkdir_cmd};'"
         slurm_obj = {
             "username": task["username"],
             "job": {
                 "script": slurm_cmd,
-                "environment": [ "PATH=/bin/:/usr/bin/:/sbin/" ],
+                "environment": ["PATH=/bin/:/usr/bin/:/sbin/"],
                 "current_working_directory": f"{task['cwd']}",
                 "name": f"hpc-proxy-preliminary-{task['name']}-{task['uuid']}-preliminary",
                 "partition": task["slurm"]["partition"],
                 "cpus_per_task": 1,
-                "memory_per_cpu": { "set": True, "number": 100 },
-                "time_limit": { "set": True, "number": 100 },
+                "memory_per_cpu": {"set": True, "number": 100},
+                "time_limit": {"set": True, "number": 100},
                 "standard_output": "/dev/null",
                 "standard_error": "/dev/null",
             },
         }
-        # print(f" * SLURM preliminary payload: {slurm_obj}", file=sys.stderr)
+        # app.logger.debug(f"SLURM preliminary payload: {slurm_obj}")
         return slurm_obj
     except KeyError as err:
-        print(f" * Error: Missing keys from task.dirs - {err}", file=sys.stderr)
+        app.logger.error(f"Missing keys from task - {task} - {err}")
         return None
 
 
@@ -389,4 +408,9 @@ def is_task_valid(task: dict) -> bool:
     Returns:
         bool: True if the task is valid, False otherwise.
     """
-    return all([k in task for k in ["name", "params", "username", "cwd", "uuid", "slurm", "dirs"]])
+    return all(
+        [
+            k in task
+            for k in ["name", "params", "username", "cwd", "uuid", "slurm", "dirs"]
+        ]
+    )

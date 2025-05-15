@@ -28,7 +28,6 @@ class NotificationCallbacks(Enum):
 
 
 class NotificationMethods:
-
     @staticmethod
     def notify_via_email(sender, recipient, subject, body):
         """
@@ -118,7 +117,9 @@ class NotificationMethods:
             print(" * Error: Invalid email body.", file=sys.stderr)
             return
 
-        credentials, _ = load_credentials_from_file(NOTIFICATIONS_GMAIL_CREDENTIALS_PATH)
+        credentials, _ = load_credentials_from_file(
+            NOTIFICATIONS_GMAIL_CREDENTIALS_PATH
+        )
 
         try:
             service = build("gmail", "v1", credentials=credentials)
@@ -199,7 +200,10 @@ class NotificationMethods:
             response = client.chat_postMessage(channel, text=msg)
             # print(f" * Slack message sent successfully: {response['message']['text']}", file=sys.stderr)
         except SlackApiError as err:
-            print(f" * Error: Failed to send Slack message: {err.response['error']}", file=sys.stderr)
+            print(
+                f" * Error: Failed to send Slack message: {err.response['error']}",
+                file=sys.stderr,
+            )
 
     @staticmethod
     def notify_via_test(msg):

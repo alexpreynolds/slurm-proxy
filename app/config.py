@@ -15,7 +15,7 @@ class Config:
             'formatter': 'default'
         }},
         'root': {
-            'level': 'WARNING',
+            'level': 'INFO',
             'handlers': ['wsgi']
         }
     }

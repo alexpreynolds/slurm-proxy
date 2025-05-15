@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import os
-# import logging
-# import logging.config
+import logging
+from logging.config import dictConfig
 from flask import Flask
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -18,15 +18,18 @@ from app.helpers import (
     ping_mongodb_client,
 )
 
+
 def create_app():
     """
-    If there is a valid key for generating Slurm authentication tokens, 
-    create a Flask application instance and configure it. This function 
+    If there is a valid key for generating Slurm authentication tokens,
+    create a Flask application instance and configure it. This function
     initializes the Flask application, registers blueprints, and sets up
     the MongoDB connection. It also initializes the background scheduler
     for polling SLURM jobs.
     """
-    dotenv_path = os.environ.get("DOTENV_FILE", os.path.join(os.path.dirname(__file__), '.env'))
+    dotenv_path = os.environ.get(
+        "DOTENV_FILE", os.path.join(os.path.dirname(__file__), ".env")
+    )
     if os.path.exists(dotenv_path):
         load_dotenv(dotenv_path)
 
@@ -36,8 +39,9 @@ def create_app():
 
     app = Flask(APP_NAME)
 
-    # app.config.from_object('app.config.Config')
-    # logging.config.dictConfig(app.config['LOGGING_CONFIG'])
+    app.config.from_object("app.config.Config")
+    logging.config.dictConfig(app.config["LOGGING_CONFIG"])
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
     app.register_blueprint(task_submission, url_prefix="/submit")
     app.register_blueprint(task_monitoring, url_prefix="/monitor")
@@ -45,8 +49,9 @@ def create_app():
 
     @app.route("/ping")
     def ping():
+        app.logger.info(f"ping > pong")
         return "pong"
-    
+
     with app.app_context():
         ping_mongodb_client()
         scheduler = BackgroundScheduler()
@@ -55,7 +60,11 @@ def create_app():
             "interval",
             minutes=int(MONITOR_POLLING_INTERVAL),
             id="poll_slurm_jobs",
+            replace_existing=True,
+            max_instances=1,
+            misfire_grace_time=60,
         )
         scheduler.start()
+        app.logger.info("Application started and scheduler initialized")
 
     return app

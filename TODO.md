@@ -26,21 +26,9 @@
   - [x] Move SSH and MongoDB connection code out of constants/helpers and into seperate singleton classes
   - [x] Modify `task_*` calls to SSH and MongoDB to use singleton connection
 
-- [ ] General
-  - [ ] Replace remaining print statements with logger calls and set level (DEBUG)
-  - [ ] Allow the task payload to pass in `name`, `cmd`, and `default_params` properties without need to customize `constants.py`
-
-- [ ] Documentation 
-  - [ ] Task submission
-  - [ ] Task monitoring
-  - [ ] Notification options (email, Slack, RabbitMQ)
-  - [ ] Document in README or other mechanism
-
-- [ ] MongoDB database backup strategy
-  - [ ] Definition
-  - [ ] Implementation as part of Docker distribution
-  - [ ] Test how app behaves if mongodb service is brought down
-    - [ ] Decide how to report errors
+- [x] General
+  - [x] Replace remaining print statements with logger calls and set level (INFO)
+  - [x] Allow the task payload to pass in `name`, `cmd`, and `default_params` properties without need to customize `constants.py`
 
 - [ ] Docker deployment #feat @alexpreynolds
   - [x] Modify Dockerfile and test w/o environment variables 2025-04-29
@@ -59,3 +47,15 @@
     - [ ] Log rolling
   - [ ] Messaging
     - [ ] What options would need to be enabled?
+
+- [ ] Documentation 
+  - [ ] Task submission
+  - [ ] Task monitoring
+  - [ ] Notification options (email, Slack, RabbitMQ)
+  - [ ] Document in README or other mechanism
+
+- [ ] MongoDB database backup strategy
+  - [ ] Definition
+  - [ ] Implementation as part of Docker distribution
+  - [ ] Test how app behaves if mongodb service is brought down
+    - [ ] Decide how to report errors

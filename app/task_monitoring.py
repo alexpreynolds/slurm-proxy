@@ -7,11 +7,13 @@ from flask import (
     Blueprint,
     request,
     Response,
+    Flask,
 )
 from app.helpers import (
     stream_json_response,
 )
 from app.constants import (
+    APP_NAME,
     SLURM_STATE,
     SLURM_STATE_UNKNOWN,
     SLURM_STATE_END_STATES,
@@ -19,7 +21,7 @@ from app.constants import (
     SLURM_TEST_JOB_STATUS,
     SLURM_REST_GENERIC_USERNAME,
     TASK_METADATA,
-    SlurmCommunicationMethods
+    SlurmCommunicationMethods,
 )
 from app.task_notification import NotificationCallbacks
 from app.task_ssh_client import ssh_client_connection_singleton
@@ -28,10 +30,10 @@ from app.task_mongodb_client import mongodb_connection_singleton
 
 ssh_connection = ssh_client_connection_singleton
 mongodb_connection = mongodb_connection_singleton
+app = Flask(APP_NAME)
 
 SLURM_STATES_ALLOWED = SLURM_STATE.keys()
 SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.REST
-# SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.SSH
 
 task_monitoring = Blueprint("task_monitoring", __name__)
 
@@ -50,6 +52,7 @@ def post() -> Response:
     request_info = request.get_json(force=True)
     job = request_info.get("job")
     if not job:
+        app.logger.error("No job provided to be monitored")
         return {"error": "No job provided to be monitored"}, 400
     response = (
         stream_json_response(job, 200)
@@ -59,7 +62,9 @@ def post() -> Response:
     return response
 
 
-@task_monitoring.route("/slurm_job_id/<slurm_job_id>", methods=["GET"], strict_slashes=False)
+@task_monitoring.route(
+    "/slurm_job_id/<slurm_job_id>", methods=["GET"], strict_slashes=False
+)
 def get_job_metadata_by_slurm_job_id(slurm_job_id: str) -> Response:
     """
     GET request to retrieve job metadata from the monitor database using the SLURM job ID.
@@ -80,10 +85,13 @@ def get_job_metadata_by_slurm_job_id(slurm_job_id: str) -> Response:
         slurm_username,
     )
     # if not slurm_job_status_metadata:
-        # job not found in SLURM scheduler for specified ID and username
-        # return {"error": "Job information not found"}, 404
+    # job not found in SLURM scheduler for specified ID and username
+    # return {"error": "Job information not found"}, 404
     monitor_db_job_metadata = get_job_metadata_from_monitor_db(slurm_job_id)
     if not slurm_job_status_metadata and not monitor_db_job_metadata:
+        app.logger.error(
+            f"get_job_metadata_by_slurm_job_id | Job {slurm_job_id} not found in SLURM scheduler or monitor database"
+        )
         return {"error": "Job and monitor information not found"}, 404
     slurm_job_state = (
         slurm_job_status_metadata["state"]
@@ -107,7 +115,9 @@ def get_job_metadata_by_slurm_job_id(slurm_job_id: str) -> Response:
     return response
 
 
-@task_monitoring.route("/slurm_job_state/<slurm_job_state>", methods=["GET"], strict_slashes=False)
+@task_monitoring.route(
+    "/slurm_job_state/<slurm_job_state>", methods=["GET"], strict_slashes=False
+)
 def get_by_slurm_job_state(slurm_job_state: str) -> Response:
     """
     GET request to retrieve job metadata from the monitor database using the SLURM job state.
@@ -120,6 +130,9 @@ def get_by_slurm_job_state(slurm_job_state: str) -> Response:
         Response: A Flask Response object containing the job metadata in JSON format.
     """
     if slurm_job_state not in SLURM_STATES_ALLOWED:
+        app.logger.error(
+            f"get_by_slurm_job_state | Invalid SLURM job state: {slurm_job_state}"
+        )
         return {"error": "Invalid state key"}, 400
     # also query the database for jobs with the given state, for comparison
     jobs = get_slurm_jobs_metadata_by_slurm_job_state(slurm_job_state)
@@ -127,7 +140,9 @@ def get_by_slurm_job_state(slurm_job_state: str) -> Response:
     return response
 
 
-@task_monitoring.route("/slurm_job_id/<slurm_job_id>", methods=["DELETE"], strict_slashes=False)
+@task_monitoring.route(
+    "/slurm_job_id/<slurm_job_id>", methods=["DELETE"], strict_slashes=False
+)
 def delete_by_slurm_job_id(slurm_job_id: int) -> Response:
     """
     DELETE request to remove a job from the monitor database using the SLURM job ID.
@@ -158,20 +173,30 @@ def delete_by_slurm_job_id(slurm_job_id: int) -> Response:
             (stdin, stdout, stderr) = ssh_connection.ssh_client_exec(cmd)
             exit_code = stdout.channel.recv_exit_status()
             if exit_code != 0:
+                app.logger.error(
+                    f'delete_by_slurm_job_id | Failed to delete job from SLURM: {stderr.read().decode("utf-8")}'
+                )
                 response = stream_json_response(
                     {"error": "Job could not be deleted from SLURM scheduler"}, 400
                 )
                 return response
         except paramiko.SSHException as err:
+            app.logger.error(
+                f"delete_by_slurm_job_id | Failed to delete job from SLURM via SSH client: {err}"
+            )
             response = stream_json_response(
                 {"error": f"Failed to delete job from SLURM: {err}"}, 500
             )
             return response
         except Exception as err:
+            app.logger.error(f"delete_by_slurm_job_id | Unexpected error: {err}")
             response = stream_json_response({"error": f"Unexpected error: {err}"}, 500)
             return response
     else:
         # job not found in the database
+        app.logger.error(
+            f"delete_by_slurm_job_id | Job {slurm_job_id} not found in monitor database"
+        )
         response = stream_json_response(
             {"error": f"Job not found in monitor database"}, 404
         )
@@ -202,7 +227,7 @@ def monitor_new_slurm_job(job: dict) -> bool:
     try:
         slurm_job_id = int(job["slurm_job_id"])
     except TypeError as err:
-        print(f" * Error: {job['slurm_job_id']} {err}", file=sys.stderr)
+        app.logger.error(f"monitor_new_slurm_job | {job['slurm_job_id']} {err}")
         return False
     slurm_username = job["task"]["username"]
     slurm_job_status_metadata = get_current_slurm_job_metadata_by_slurm_job_id(
@@ -218,7 +243,6 @@ def monitor_new_slurm_job(job: dict) -> bool:
         else SLURM_STATE_UNKNOWN
     )
     slurm_job_task_metadata = job["task"]
-    # print(f" * Adding job to monitor database: {slurm_job_id} | {slurm_job_state}", file=sys.stderr)
     result = add_job_to_monitor_db(
         slurm_job_id, slurm_job_state, slurm_job_task_metadata, slurm_username
     )
@@ -229,7 +253,10 @@ def monitor_new_slurm_job(job: dict) -> bool:
 
 
 def add_job_to_monitor_db(
-    slurm_job_id: int, slurm_job_state: str, slurm_job_task_metadata: dict, slurm_username: str
+    slurm_job_id: int,
+    slurm_job_state: str,
+    slurm_job_task_metadata: dict,
+    slurm_username: str,
 ) -> bool:
     """
     Add a new job to the monitor database.
@@ -263,7 +290,9 @@ def add_job_to_monitor_db(
             jobs_coll.insert_one(job)
         return True
     except pymongo.errors.PyMongoError as err:
-        print(f" * Error adding job to monitor database: {err}", file=sys.stderr)
+        app.logger.error(
+            f"add_job_to_monitor_db | Error adding job to monitor database: {err}"
+        )
         return False
 
 
@@ -290,7 +319,9 @@ def get_job_metadata_from_monitor_db(slurm_job_id: int) -> dict:
         else:
             return None
     except pymongo.errors.PyMongoError as err:
-        print(f" * Error retrieving job information from monitor database: {err}", file=sys.stderr)
+        app.logger.error(
+            f"get_job_metadata_from_monitor_db | Error retrieving job information from monitor database: {err}"
+        )
         return None
 
 
@@ -317,7 +348,9 @@ def update_job_state_in_monitor_db(slurm_job_id: int, new_slurm_job_state: str) 
             return False
         return True
     except pymongo.errors.PyMongoError as err:
-        print(f" * Error updating job state in monitor database: {err}", file=sys.stderr)
+        app.logger.error(
+            f"update_job_state_in_monitor_db | Error updating job state in monitor database: {err}"
+        )
         return False
 
 
@@ -338,7 +371,9 @@ def remove_job_from_monitor_db_by_slurm_job_id(slurm_job_id: int) -> bool:
             return False
         return True
     except pymongo.errors.PyMongoError as err:
-        print(f" * Error removing job from monitor database: {err}", file=sys.stderr)
+        app.logger.error(
+            f"remove_job_from_monitor_db_by_slurm_job_id | Error removing job from monitor database: {err}"
+        )
         return False
 
 
@@ -357,18 +392,28 @@ def remove_and_return_job_from_monitor_db_by_slurm_job_id(slurm_job_id: int) -> 
         result = jobs_coll.find_one_and_delete({"slurm_job_id": slurm_job_id})
         return result
     except pymongo.errors.PyMongoError as err:
-        print(f" * Error removing job from monitor database: {err}", file=sys.stderr)
+        app.logger.error(
+            f"remove_and_return_job_from_monitor_db_by_slurm_job_id | Error removing job from monitor database: {err}"
+        )
         return None
 
 
-def get_current_slurm_job_metadata_by_slurm_job_id(slurm_job_id: int, slurm_username: str) -> dict:
+def get_current_slurm_job_metadata_by_slurm_job_id(
+    slurm_job_id: int, slurm_username: str
+) -> dict:
     if SLURM_COMMUNICATION_METHOD == SlurmCommunicationMethods.SSH:
-      return get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(slurm_job_id, slurm_username)
+        return get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(
+            slurm_job_id, slurm_username
+        )
     elif SLURM_COMMUNICATION_METHOD == SlurmCommunicationMethods.REST:
-      return get_current_slurm_job_metadata_by_slurm_job_id_via_rest(slurm_job_id, slurm_username)
+        return get_current_slurm_job_metadata_by_slurm_job_id_via_rest(
+            slurm_job_id, slurm_username
+        )
 
 
-def get_current_slurm_job_metadata_by_slurm_job_id_via_rest(slurm_job_id: int, slurm_username: str) -> dict:
+def get_current_slurm_job_metadata_by_slurm_job_id_via_rest(
+    slurm_job_id: int, slurm_username: str
+) -> dict:
     if not slurm_job_id:
         return None
     if not slurm_username:
@@ -378,43 +423,55 @@ def get_current_slurm_job_metadata_by_slurm_job_id_via_rest(slurm_job_id: int, s
         return SLURM_TEST_JOB_STATUS
     # REST API call to get the job status
     from app.task_slurm_rest import get_job_info_for_job_id_via_params
-    job_status_response, job_status_response_code, query_url = get_job_info_for_job_id_via_params(slurm_job_id, slurm_username)
+
+    (
+        job_status_response,
+        job_status_response_code,
+        query_url,
+    ) = get_job_info_for_job_id_via_params(slurm_job_id, slurm_username)
     if not job_status_response or job_status_response_code != 200:
-        print(f" * Error: No job status information found for job ID {slurm_job_id} and user {slurm_username} | {job_status_response_code} | {query_url}", file=sys.stderr)
+        app.logger.error(
+            f"get_current_slurm_job_metadata_by_slurm_job_id_via_rest | No job status information found for job ID {slurm_job_id} and user {slurm_username} | {job_status_response_code} | {query_url}"
+        )
         return None
     job_status_jobs = job_status_response.get("jobs", None)
-    # import pprint
-    # print(f" * Job status jobs: {pprint.pprint(job_status_jobs)}", file=sys.stderr)
     if not job_status_jobs or len(job_status_jobs) == 0:
-        print(f" * Error: No job status information found for job ID {slurm_job_id} and user {slurm_username}", file=sys.stderr)
+        app.logger.error(
+            f"get_current_slurm_job_metadata_by_slurm_job_id_via_rest | No job status information found for job ID {slurm_job_id} and user {slurm_username}"
+        )
         return None
     job_status_job_instance = job_status_jobs[0]
     # ref. https://slurm.schedmd.com/rest_api.html#v0.0.42_openapi_slurmdbd_jobs_resp
     try:
-        result = {
-            "state": SLURM_STATE_UNKNOWN,
-            "user": slurm_username
-        }
+        result = {"state": SLURM_STATE_UNKNOWN, "user": slurm_username}
         if job_status_job_instance["state"]["current"][0] not in SLURM_STATES_ALLOWED:
             result["state"] = SLURM_STATE_UNKNOWN
         else:
             result["state"] = job_status_job_instance["state"]["current"][0]
         if job_status_job_instance["user"] != slurm_username:
             result["user"] = job_status_job_instance["user"]
-            print(f" * Warning: Job {slurm_job_id} is not owned by user {slurm_username}", file=sys.stderr)
+            app.logger.warning(
+                f"get_current_slurm_job_metadata_by_slurm_job_id_via_rest | Job {slurm_job_id} is not owned by user {slurm_username}"
+            )
             # raise NameError(
             #     f"Job {slurm_job_id} is not owned by user {slurm_username}"
             # )
         return result
     except TypeError as err:
-        print(f" * Error: {err}\n {job_status_job_instance}", file=sys.stderr)
+        app.logger.error(
+            f"get_current_slurm_job_metadata_by_slurm_job_id_via_rest | Error: {err} | {job_status_job_instance}"
+        )
         return None
     except NameError as err:
-        print(f" * Error: {err}", file=sys.stderr)
+        app.logger.error(
+            f"get_current_slurm_job_metadata_by_slurm_job_id_via_rest | Error: {err} | {job_status_job_instance}"
+        )
         return None
 
 
-def get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(slurm_job_id: int, slurm_username: str) -> dict:
+def get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(
+    slurm_job_id: int, slurm_username: str
+) -> dict:
     """
     Get the current SLURM job metadata by job ID via SSH.
 
@@ -465,15 +522,20 @@ def get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(slurm_job_id: int, sl
         if job_status["state"] not in SLURM_STATES_ALLOWED:
             job_status["state"] = SLURM_STATE_UNKNOWN
         if job_status["user"] != slurm_username:
-            raise NameError(
-                f"Job {slurm_job_id} is not owned by user {slurm_username}"
+            app.logger.error(
+                f"get_current_slurm_job_metadata_by_slurm_job_id_via_ssh | Job {slurm_job_id} is not owned by user {slurm_username}"
             )
+            raise NameError(f"Job {slurm_job_id} is not owned by user {slurm_username}")
         return job_status
     except TypeError as err:
-        print(f" * Error: {err}", file=sys.stderr)
+        app.logger.error(
+            f"get_current_slurm_job_metadata_by_slurm_job_id_via_ssh | Error: {err}"
+        )
         return None
     except NameError as err:
-        print(f" * Error: {err}", file=sys.stderr)
+        app.logger.error(
+            f"get_current_slurm_job_metadata_by_slurm_job_id_via_ssh | Error: {err}"
+        )
         return None
 
 
@@ -537,7 +599,7 @@ def poll_slurm_jobs() -> None:
     the job status if there are any changes. If a job is marked as finished, a state
     change event is triggered.
     """
-    # print(" * Polling SLURM jobs...", file=sys.stderr)
+    # app.logger.debug("poll_slurm_jobs | Polling SLURM jobs...")
     try:
         jobs_coll = mongodb_connection.get_monitor_jobs_collection()
         jobs = jobs_coll.find()
@@ -545,7 +607,7 @@ def poll_slurm_jobs() -> None:
             slurm_job_id = int(job["slurm_job_id"])
             monitor_db_job_state = job["slurm_job_state"]
             slurm_username = job["task"].get("username", SLURM_REST_GENERIC_USERNAME)
-            # print(f'poll: testing {slurm_job_id} | {monitor_db_job_state}', file=sys.stderr)
+            # app.logger.debug(f"poll_slurm_jobs | Testing {slurm_job_id} | {monitor_db_job_state}")
             if monitor_db_job_state in SLURM_STATE_END_STATES:
                 # job is already completed, therefore no need to check its state
                 continue
@@ -569,7 +631,9 @@ def poll_slurm_jobs() -> None:
                     )
                 update_job_state_in_monitor_db(slurm_job_id, new_slurm_job_state)
     except pymongo.errors.PyMongoError as err:
-        print(f" * Error polling SLURM jobs in monitor db: {err}", file=sys.stderr)
+        app.logger.error(
+            f"poll_slurm_jobs | Error polling SLURM jobs in monitor db: {err}"
+        )
 
 
 def process_job_state_change(
@@ -594,7 +658,7 @@ def process_job_state_change(
     #     file=sys.stderr
     # )
     if new_slurm_job_state in SLURM_STATE_END_STATES:
-        # print(f" * Sending notification message for job {slurm_job_id}", file=sys.stderr)
+        # app.logger.debug(f'process_job_state_change | Sending notification message for job {slurm_job_id}')
         try:
             jobs_coll = mongodb_connection.get_monitor_jobs_collection()
             result = jobs_coll.find_one({"slurm_job_id": slurm_job_id})
@@ -608,8 +672,11 @@ def process_job_state_change(
                 task_notification_params = task_notification["params"]
                 msg = f"Sending test notification for: {slurm_job_id}!"
                 for method in task_notification_methods:
-                    # print(f" * Sending notification message via method {method}", file=sys.stderr)
-                    if method == NotificationCallbacks.EMAIL or method == NotificationCallbacks.GMAIL:
+                    # app.logger.debug(f'process_job_state_change | Sending notification message via method {method}')
+                    if (
+                        method == NotificationCallbacks.EMAIL
+                        or method == NotificationCallbacks.GMAIL
+                    ):
                         sender = task_notification_params["email"]["sender"]
                         recipient = task_notification_params["email"]["recipient"]
                         subject = task_notification_params["email"]["subject"]
@@ -617,24 +684,34 @@ def process_job_state_change(
                         try:
                             method.value(sender, recipient, subject, body)
                         except Exception as err:
-                            pass
+                            app.logger.warning(
+                                f"process_job_state_change | Could not email or Gmail: {err}"
+                            )
                     elif method == NotificationCallbacks.SLACK:
                         try:
-                            method.value(msg, task_notification_params["slack"]["channel"])
+                            method.value(
+                                msg, task_notification_params["slack"]["channel"]
+                            )
                         except Exception as err:
-                            pass
+                            app.logger.warning(
+                                f"process_job_state_change | Could not Slack message: {err}"
+                            )
                     elif method == NotificationCallbacks.RABBITMQ:
                         try:
                             method.value(
-                              task_notification_params["rabbitmq"]["queue"],
-                              task_notification_params["rabbitmq"]["exchange"],
-                              task_notification_params["rabbitmq"]["routing_key"],
-                              msg,
+                                task_notification_params["rabbitmq"]["queue"],
+                                task_notification_params["rabbitmq"]["exchange"],
+                                task_notification_params["rabbitmq"]["routing_key"],
+                                msg,
                             )
                         except Exception as err:
-                            pass
+                            app.logger.warning(
+                                f"process_job_state_change | Could not RabbitMQ message: {err}"
+                            )
                     elif method == NotificationCallbacks.TEST:
                         method.value(msg)
         except pymongo.errors.PyMongoError as err:
-            print(f" * Error removing job from monitor database: {err}", file=sys.stderr)
+            app.logger.error(
+                f"process_job_state_change | Error removing job from monitor database: {err}"
+            )
             return None

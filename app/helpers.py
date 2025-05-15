@@ -6,16 +6,22 @@ from flask import (
     Response,
     json,
     stream_with_context,
+    Flask,
 )
 from app.constants import (
+    APP_NAME,
     MONGODB_URI,
 )
 from app.task_mongodb_client import MongoDBConnection
 
 mongodb_connection = MongoDBConnection()
+app = Flask(APP_NAME)
 
 
-def ping_mongodb_client(client: pymongo.MongoClient = mongodb_connection.get_client(), uri: str = MONGODB_URI) -> None:
+def ping_mongodb_client(
+    client: pymongo.MongoClient = mongodb_connection.get_client(),
+    uri: str = MONGODB_URI,
+) -> None:
     """
     Ping the MongoDB client to check if it is connected.
     This function attempts to ping the MongoDB client and raises an exception
@@ -30,9 +36,11 @@ def ping_mongodb_client(client: pymongo.MongoClient = mongodb_connection.get_cli
     """
     try:
         client.admin.command("ping")
-        print(f" * MongoDB running on {uri}", file=sys.stderr)
+        app.logger.info(f"MongoDB running on {uri}")
     except pymongo.errors.ConnectionFailure as err:
-        print(f" * MongoDB connection failed - is the server running?\nError: {err}", file=sys.stderr)
+        app.logger.error(
+            f"MongoDB connection failed - is the server running?\nError: {err}"
+        )
         sys.exit(-1)
 
 
@@ -62,7 +70,7 @@ def stream_json_response(data: dict, status_code: int = 200) -> Response:
 
 
 def get_dict_from_streamed_json_response(response_as_json: Response) -> dict:
-    res = ''
+    res = ""
     while True:
         try:
             res += next(response_as_json.response)

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import logging
 import paramiko
 from enum import Enum
 from app.task_notification import NotificationCallbacks

@@ -10,7 +10,6 @@ file = Path(__file__).resolve()
 parent, root = file.parent, file.parents[1]
 sys.path.append(str(root))
 
-from app.task_submission import task_submission
 from app.helpers import (
     get_slurm_proxy_app,
 )

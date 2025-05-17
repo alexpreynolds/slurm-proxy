@@ -18,7 +18,10 @@ from app.constants import (
     SLURM_STATE_UNKNOWN,
     SlurmCommunicationMethods,
 )
-from app.task_monitoring import monitor_new_slurm_job
+from app.task_monitoring import (
+    get_job_metadata_from_monitor_db_by_task_uuid,
+    monitor_new_slurm_job,
+)
 from app.task_ssh_client import ssh_client_connection_singleton
 
 ssh_connection = ssh_client_connection_singleton
@@ -230,13 +233,16 @@ def submit_slurm_job_via_rest(task: dict) -> int:
     """
     Send the job to the SLURM scheduler via RESTful request.
 
-    This function submits a preliminary job to the SLURM scheduler using a RESTful
-    request, which generates directories for input, output, and error files. The
-    job id that results is used as a dependency for the actual (main) job.
+    This function tests if the task UUID is unique. If unique, this submits a 
+    preliminary job to the SLURM scheduler to generate directories for input, 
+    output, and error files. 
+    
+    The job id that results is used as a dependency for the actual ("main") job
+    that follows.
 
     This function then constructs the equivalent sbatch command using the
     parameters provided in the task dictionary and sends it to the SLURM
-    scheduler via REST API.
+    scheduler via REST API. It is run only if the preliminary job is successful.
 
     Args:
         task (dict): The task dictionary containing information about the task
@@ -248,6 +254,13 @@ def submit_slurm_job_via_rest(task: dict) -> int:
     """
     from app.task_slurm_rest import submit_job_via_params
 
+    job_metadata = get_job_metadata_from_monitor_db_by_task_uuid(task["uuid"])
+    if job_metadata:
+        app.logger.error(
+            f"Task UUID {task['uuid']} already exists in monitor database - {job_metadata}"
+        )
+        return BAD_SLURM_JOB_ID
+    
     preliminary_payload = get_preliminary_slurm_rest_payload_for_task(task)
     if not preliminary_payload:
         # print(" * Failed to define preliminary REST payload for submission; validate task parameters", file=sys.stderr)

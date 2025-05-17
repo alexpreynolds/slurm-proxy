@@ -1,33 +1,92 @@
 # -*- coding: utf-8 -*-
 
+import re
 import sys
+import pika
+import base64
+import smtplib
 from enum import Enum
+from flask import Flask
 from functools import partial
+from email.mime.text import MIMEText
+from email.message import EmailMessage
+from google.auth import load_credentials_from_file
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
+from app.constants import (
+    APP_NAME,
+    NOTIFICATIONS_SMTP_SERVER,
+    NOTIFICATIONS_SMTP_PORT,
+    NOTIFICATIONS_SMTP_USERNAME,
+    NOTIFICATIONS_SMTP_PASSWORD,
+    NOTIFICATIONS_GMAIL_CREDENTIALS_PATH,
+    NOTIFICATIONS_RABBITMQ_HOST,
+    NOTIFICATIONS_RABBITMQ_PORT,
+    NOTIFICATIONS_RABBITMQ_USERNAME,
+    NOTIFICATIONS_RABBITMQ_PASSWORD,
+    NOTIFICATIONS_RABBITMQ_PATH,
+    NOTIFICATIONS_SLACK_BOT_TOKEN,
+    NOTIFICATIONS_SLACK_CHANNEL,
+)
+
+app = Flask(APP_NAME)
 
 
-class NotificationCallbacks(Enum):
+class NotificationMethod(Enum):
     EMAIL = partial(
-        lambda sender, recipient, subject, body: NotificationMethods.notify_via_email(
+        lambda sender, recipient, subject, body: NotificationCallback.notify_via_email(
             sender, recipient, subject, body
         )
     )
     GMAIL = partial(
-        lambda sender, recipient, subject, body: NotificationMethods.notify_via_gmail(
+        lambda sender, recipient, subject, body: NotificationCallback.notify_via_gmail(
             sender, recipient, subject, body
         )
     )
     RABBITMQ = partial(
-        lambda queue, exchange, routing_key, body: NotificationMethods.notify_via_rabbitmq(
+        lambda queue, exchange, routing_key, body: NotificationCallback.notify_via_rabbitmq(
             queue, exchange, routing_key, body
         )
     )
     SLACK = partial(
-        lambda msg, channel: NotificationMethods.notify_via_slack(msg, channel)
+        lambda msg, channel: NotificationCallback.notify_via_slack(msg, channel)
     )
-    TEST = partial(lambda msg: NotificationMethods.notify_via_test(msg))
+    TEST = partial(lambda msg: NotificationCallback.notify_via_test(msg))
 
 
-class NotificationMethods:
+class NotificationCallback:
+    @staticmethod
+    def validate_email_parameters(sender, recipient, subject, body):
+        """
+        Validates the email address.
+
+        Args:
+            email (str): The email address to validate.
+
+        Returns:
+            bool: True if valid, False otherwise.
+        """
+        email_pattern = r"^\S+@\S+\.\S+$"
+        if not re.match(email_pattern, sender):
+            app.logger.error(
+                "validate_email_parameters | Invalid sender email address."
+            )
+            return False
+        if not re.match(email_pattern, recipient):
+            app.logger.error(
+                "validate_email_parameters | Invalid recipient email address."
+            )
+            return False
+        if not subject or subject.strip() == "":
+            app.logger.error("validate_email_parameters | Invalid email subject.")
+            return False
+        if not body or body.strip() == "":
+            app.logger.error("validate_email_parameters | Invalid email body.")
+            return False
+        return True
+
     @staticmethod
     def notify_via_email(sender, recipient, subject, body):
         """
@@ -39,32 +98,17 @@ class NotificationMethods:
             subject (str): The subject of the email.
             body (str): The body of the email.
         """
-        print(
-            f" * Sending email to {recipient} with subject '{subject}' and body '{body}'"
+        app.logger.debug(
+            f"notify_via_email | Sending email from {sender} to {recipient} with subject '{subject}' and body '{body}'"
         )
-        import re
-        import smtplib
-        from email.mime.text import MIMEText
-        from app.constants import (
-            NOTIFICATIONS_SMTP_SERVER,
-            NOTIFICATIONS_SMTP_PORT,
-            NOTIFICATIONS_SMTP_USERNAME,
-            NOTIFICATIONS_SMTP_PASSWORD,
-        )
+        if not NotificationCallbacks.validate_email_parameters(
+            sender, recipient, subject, body
+        ):
+            app.logger.error(
+                "notify_via_email | Invalid email parameters. See error log."
+            )
+            return
 
-        email_pattern = r"^\S+@\S+\.\S+$"
-        if not re.match(email_pattern, sender):
-            print(" * Error: Invalid sender email address.", file=sys.stderr)
-            return
-        if not re.match(email_pattern, recipient):
-            print(" * Error: Invalid recipient email address.", file=sys.stderr)
-            return
-        if not subject or subject.strip() == "":
-            print(" * Error: Invalid email subject.", file=sys.stderr)
-            return
-        if not body or body.strip() == "":
-            print(" * Error: Invalid email body.", file=sys.stderr)
-            return
         message = MIMEText(body)
         message["From"] = sender
         message["To"] = recipient
@@ -77,7 +121,7 @@ class NotificationMethods:
                 server.login(NOTIFICATIONS_SMTP_USERNAME, NOTIFICATIONS_SMTP_PASSWORD)
                 server.sendmail(sender, recipient, message.as_string())
         except Exception as err:
-            print(f" * Failed to send email: {err}", file=sys.stderr)
+            app.logger.error(f"notify_via_email | Failed to send email: {err}")
 
     @staticmethod
     def notify_via_gmail(sender, recipient, subject, body):
@@ -90,31 +134,15 @@ class NotificationMethods:
             subject (str): The subject of the email.
             body (str): The body of the email.
         """
-        print(
-            f" * Sending Gmail to {recipient} with subject '{subject}' and body '{body}'"
+        app.logger.debug(
+            f"Sending email from {sender} to {recipient} with subject '{subject}' and body '{body}'"
         )
-        import re
-        import base64
-        from email.message import EmailMessage
-        from google.auth import load_credentials_from_file
-        from googleapiclient.discovery import build
-        from googleapiclient.errors import HttpError
-        from app.constants import (
-            NOTIFICATIONS_GMAIL_CREDENTIALS_PATH,
-        )
-
-        email_pattern = r"^\S+@\S+\.\S+$"
-        if not re.match(email_pattern, sender):
-            print(" * Error: Invalid sender email address.", file=sys.stderr)
-            return
-        if not re.match(email_pattern, recipient):
-            print(" * Error: Invalid recipient email address.", file=sys.stderr)
-            return
-        if not subject or subject.strip() == "":
-            print(" * Error: Invalid email subject.", file=sys.stderr)
-            return
-        if not body or body.strip() == "":
-            print(" * Error: Invalid email body.", file=sys.stderr)
+        if not NotificationCallbacks.validate_email_parameters(
+            sender, recipient, subject, body
+        ):
+            app.logger.error(
+                "notify_via_gmail | Invalid email parameters. See error log."
+            )
             return
 
         credentials, _ = load_credentials_from_file(
@@ -136,9 +164,11 @@ class NotificationMethods:
                 .send(userId="me", body=create_message)
                 .execute()
             )
-            print(f" * Gmail sent successfully: {send_message['id']}", file=sys.stderr)
+            app.logger.debug(
+                f"notify_via_gmail | Gmail sent successfully: {send_message['id']}"
+            )
         except HttpError as err:
-            print(f" * Gmail error occurred: {err}", file=sys.stderr)
+            app.logger.error(f"notify_via_gmail | Gmail error occurred: {err}")
             send_message = None
 
     @staticmethod
@@ -154,30 +184,35 @@ class NotificationMethods:
             routing_key (str): The routing key for the message.
             body (str): The body of the message.
         """
-        from app.constants import (
-            NOTIFICATIONS_RABBITMQ_HOST,
-            NOTIFICATIONS_RABBITMQ_PORT,
-            NOTIFICATIONS_RABBITMQ_USERNAME,
-            NOTIFICATIONS_RABBITMQ_PASSWORD,
-            NOTIFICATIONS_RABBITMQ_PATH,
-        )
-        import pika
-
-        credentials = pika.PlainCredentials(
-            NOTIFICATIONS_RABBITMQ_USERNAME, NOTIFICATIONS_RABBITMQ_PASSWORD
-        )
-        connection = pika.BlockingConnection(
-            pika.ConnectionParameters(
-                NOTIFICATIONS_RABBITMQ_HOST,
-                NOTIFICATIONS_RABBITMQ_PORT,
-                NOTIFICATIONS_RABBITMQ_PATH,
-                credentials,
+        try:
+            credentials = pika.PlainCredentials(
+                NOTIFICATIONS_RABBITMQ_USERNAME, NOTIFICATIONS_RABBITMQ_PASSWORD
             )
-        )
-        channel = connection.channel()
-        channel.queue_declare(queue)
-        channel.basic_publish(exchange, routing_key, body)
-        connection.close()
+            connection = pika.BlockingConnection(
+                pika.ConnectionParameters(
+                    NOTIFICATIONS_RABBITMQ_HOST,
+                    NOTIFICATIONS_RABBITMQ_PORT,
+                    NOTIFICATIONS_RABBITMQ_PATH,
+                    credentials,
+                )
+            )
+            channel = connection.channel()
+            channel.queue_declare(queue)
+            channel.basic_publish(exchange, routing_key, body)
+            connection.close()
+            app.logger.debug(
+                f"notify_via_rabbitmq | Message sent to RabbitMQ queue '{queue}' with routing key '{routing_key}': {body}"
+            )
+        except pika.exceptions.AMQPConnectionError as err:
+            app.logger.error(f"notify_via_rabbitmq | RabbitMQ connection error: {err}")
+        except pika.exceptions.AMQPChannelError as err:
+            app.logger.error(f"notify_via_rabbitmq | RabbitMQ channel error: {err}")
+        except pika.exceptions.AMQPError as err:
+            app.logger.error(f"notify_via_rabbitmq | RabbitMQ error: {err}")
+        except Exception as err:
+            app.logger.error(
+                f"notify_via_rabbitmq | Failed to send RabbitMQ message: {err}"
+            )
 
     @staticmethod
     def notify_via_slack(msg, channel):
@@ -187,23 +222,17 @@ class NotificationMethods:
         if not msg:
             print(" * Error: Empty Slack message", file=sys.stderr)
             return
-        from app.constants import (
-            NOTIFICATIONS_SLACK_BOT_TOKEN,
-            NOTIFICATIONS_SLACK_CHANNEL,
-        )
-        from slack_sdk import WebClient
-        from slack_sdk.errors import SlackApiError
-
         try:
             client = WebClient(token=NOTIFICATIONS_SLACK_BOT_TOKEN)
             channel = NOTIFICATIONS_SLACK_CHANNEL if not channel else channel
             response = client.chat_postMessage(channel, text=msg)
-            # print(f" * Slack message sent successfully: {response['message']['text']}", file=sys.stderr)
-        except SlackApiError as err:
-            print(
-                f" * Error: Failed to send Slack message: {err.response['error']}",
-                file=sys.stderr,
+            app.logger.debug(
+                f"notify_via_slack | Slack message sent successfully: {response['message']['text']}"
             )
+        except SlackApiError as err:
+            app.logger.error(f"notify_via_slack | Slack API error occurred: {err}")
+        except Exception as err:
+            app.logger.error(f"notify_via_slack | Failed to send Slack message: {err}")
 
     @staticmethod
     def notify_via_test(msg):

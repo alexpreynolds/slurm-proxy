@@ -23,7 +23,7 @@ from app.constants import (
     TASK_METADATA,
     SlurmCommunicationMethods,
 )
-from app.task_notification import NotificationCallbacks
+from app.task_notification import NotificationMethod
 from app.task_ssh_client import ssh_client_connection_singleton
 from app.task_mongodb_client import mongodb_connection_singleton
 
@@ -87,12 +87,70 @@ def get_job_metadata_by_slurm_job_id(slurm_job_id: str) -> Response:
     # if not slurm_job_status_metadata:
     # job not found in SLURM scheduler for specified ID and username
     # return {"error": "Job information not found"}, 404
-    monitor_db_job_metadata = get_job_metadata_from_monitor_db(slurm_job_id)
+    monitor_db_job_metadata = get_job_metadata_from_monitor_db_by_slurm_job_id(
+        slurm_job_id
+    )
     if not slurm_job_status_metadata and not monitor_db_job_metadata:
         app.logger.error(
             f"get_job_metadata_by_slurm_job_id | Job {slurm_job_id} not found in SLURM scheduler or monitor database"
         )
         return {"error": "Job and monitor information not found"}, 404
+    slurm_job_state = (
+        slurm_job_status_metadata["state"]
+        if slurm_job_status_metadata
+        else SLURM_STATE_UNKNOWN
+    )
+    slurm_username_from_slurmdb = (
+        slurm_job_status_metadata["user"]
+        if slurm_job_status_metadata
+        else slurm_username
+    )
+    response_data = {
+        "slurm": {
+            "job_username": slurm_username_from_slurmdb,
+            "job_id": slurm_job_id,
+            "job_state": slurm_job_state,
+        },
+        "monitor": monitor_db_job_metadata,
+    }
+    response = stream_json_response(response_data, 200)
+    return response
+
+
+@task_monitoring.route("/task_uuid/<task_uuid>", methods=["GET"], strict_slashes=False)
+def get_job_metadata_by_task_uuid(task_uuid: str) -> Response:
+    """
+    GET request to retrieve job metadata from the monitor database using the
+    task UUID. The UUID is passed as a URL parameter.
+
+    Args:
+        task_uuid (str): The task UUID of the job.
+
+    Returns:
+        Response: A Flask Response object containing the job metadata in JSON format.
+    """
+    if not task_uuid:
+        app.logger.error("get_job_metadata_by_task_uuid | No task UUID provided")
+        return {"error": "No task UUID provided"}, 400
+    monitor_db_job_metadata = get_job_metadata_from_monitor_db_by_task_uuid(task_uuid)
+    if not monitor_db_job_metadata:
+        app.logger.error(
+            f"get_job_metadata_by_task_uuid | Job {task_uuid} not found in monitor database"
+        )
+        return {"error": "Job monitor information not found"}, 404
+    slurm_job_id = monitor_db_job_metadata["slurm_job_id"]
+    slurm_username = monitor_db_job_metadata["task"].get(
+        "username", SLURM_REST_GENERIC_USERNAME
+    )
+    slurm_job_status_metadata = get_current_slurm_job_metadata_by_slurm_job_id(
+        slurm_job_id,
+        slurm_username,
+    )
+    if not slurm_job_status_metadata:
+        app.logger.error(
+            f"get_job_metadata_by_task_uuid | Job {task_uuid} not found with Slurm scheduler metadata"
+        )
+        return {"error": "Job Slurm metadata not found"}, 404
     slurm_job_state = (
         slurm_job_status_metadata["state"]
         if slurm_job_status_metadata
@@ -157,7 +215,7 @@ def delete_by_slurm_job_id(slurm_job_id: int) -> Response:
     response = None
     # check if job was already in the monitor database
     slurm_job_id = int(slurm_job_id)
-    job_metadata = get_job_metadata_from_monitor_db(slurm_job_id)
+    job_metadata = get_job_metadata_from_monitor_db_by_slurm_job_id(slurm_job_id)
     if job_metadata:
         try:
             # delete the job from SLURM queue
@@ -259,7 +317,9 @@ def add_job_to_monitor_db(
     slurm_username: str,
 ) -> bool:
     """
-    Add a new job to the monitor database.
+    Add a new job to the monitor database, only if its SLURM job ID and task
+    UUID are not already present in the database.
+
     The job dictionary should contain the SLURM job ID and task information.
     The SLURM job status is retrieved from the SLURM scheduler.
 
@@ -286,7 +346,9 @@ def add_job_to_monitor_db(
     }
     try:
         jobs_coll = mongodb_connection.get_monitor_jobs_collection()
-        if not jobs_coll.find_one({"slurm_job_id": slurm_job_id}):
+        if not jobs_coll.find_one(
+            {"slurm_job_id": slurm_job_id}
+        ) and not jobs_coll.find_one({"task.uuid": slurm_job_task_metadata["uuid"]}):
             jobs_coll.insert_one(job)
         return True
     except pymongo.errors.PyMongoError as err:
@@ -296,7 +358,7 @@ def add_job_to_monitor_db(
         return False
 
 
-def get_job_metadata_from_monitor_db(slurm_job_id: int) -> dict:
+def get_job_metadata_from_monitor_db_by_slurm_job_id(slurm_job_id: int) -> dict:
     """
     Get job metadata from the monitor database using the SLURM job ID.
 
@@ -320,7 +382,36 @@ def get_job_metadata_from_monitor_db(slurm_job_id: int) -> dict:
             return None
     except pymongo.errors.PyMongoError as err:
         app.logger.error(
-            f"get_job_metadata_from_monitor_db | Error retrieving job information from monitor database: {err}"
+            f"get_job_metadata_from_monitor_db_by_slurm_job_id | Error retrieving job information from monitor database: {err}"
+        )
+        return None
+
+
+def get_job_metadata_from_monitor_db_by_task_uuid(task_uuid: int) -> dict:
+    """
+    Get job metadata from the monitor database using the task UUID.
+
+    Args:
+        task_uuid (int): The SLURM job ID.
+
+    Returns:
+        dict: A dictionary containing the job metadata, or None if the job was not found.
+    """
+    try:
+        jobs_coll = mongodb_connection.get_monitor_jobs_collection()
+        result = jobs_coll.find_one({"task.uuid": task_uuid})
+        if result:
+            job_metadata = {
+                "slurm_job_id": result["slurm_job_id"],
+                "slurm_job_state": result["slurm_job_state"],
+                "task": result["task"],
+            }
+            return job_metadata
+        else:
+            return None
+    except pymongo.errors.PyMongoError as err:
+        app.logger.error(
+            f"get_job_metadata_from_monitor_db_by_task_uuid | Error retrieving job information from monitor database: {err}"
         )
         return None
 
@@ -653,9 +744,8 @@ def process_job_state_change(
         old_slurm_job_state (str): The old SLURM job state.
         new_slurm_job_state (str): The new SLURM job state.
     """
-    # print(
-    #     f" * Processing job state change: {slurm_job_id}: {old_slurm_job_state} -> {new_slurm_job_state}",
-    #     file=sys.stderr
+    # app.logger.debug(
+    #     f"process_job_state_change | Processing job state change: {slurm_job_id}: {old_slurm_job_state} -> {new_slurm_job_state}"
     # )
     if new_slurm_job_state in SLURM_STATE_END_STATES:
         # app.logger.debug(f'process_job_state_change | Sending notification message for job {slurm_job_id}')
@@ -674,8 +764,8 @@ def process_job_state_change(
                 for method in task_notification_methods:
                     # app.logger.debug(f'process_job_state_change | Sending notification message via method {method}')
                     if (
-                        method == NotificationCallbacks.EMAIL
-                        or method == NotificationCallbacks.GMAIL
+                        method == NotificationMethod.EMAIL
+                        or method == NotificationMethod.GMAIL
                     ):
                         sender = task_notification_params["email"]["sender"]
                         recipient = task_notification_params["email"]["recipient"]
@@ -687,7 +777,7 @@ def process_job_state_change(
                             app.logger.warning(
                                 f"process_job_state_change | Could not email or Gmail: {err}"
                             )
-                    elif method == NotificationCallbacks.SLACK:
+                    elif method == NotificationMethod.SLACK:
                         try:
                             method.value(
                                 msg, task_notification_params["slack"]["channel"]
@@ -696,7 +786,7 @@ def process_job_state_change(
                             app.logger.warning(
                                 f"process_job_state_change | Could not Slack message: {err}"
                             )
-                    elif method == NotificationCallbacks.RABBITMQ:
+                    elif method == NotificationMethod.RABBITMQ:
                         try:
                             method.value(
                                 task_notification_params["rabbitmq"]["queue"],
@@ -708,7 +798,7 @@ def process_job_state_change(
                             app.logger.warning(
                                 f"process_job_state_change | Could not RabbitMQ message: {err}"
                             )
-                    elif method == NotificationCallbacks.TEST:
+                    elif method == NotificationMethod.TEST:
                         method.value(msg)
         except pymongo.errors.PyMongoError as err:
             app.logger.error(

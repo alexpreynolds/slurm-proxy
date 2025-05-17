@@ -5,7 +5,7 @@ import sys
 import logging
 import paramiko
 from enum import Enum
-from app.task_notification import NotificationCallbacks
+from app.task_notification import NotificationMethod
 
 """
 Application name and port
@@ -43,10 +43,10 @@ TASK_METADATA = {
         "description": "Prints a generic hello world! message",
         "notification": {
             "methods": [
-                NotificationCallbacks.TEST,
-                NotificationCallbacks.EMAIL,
-                NotificationCallbacks.SLACK,
-                NotificationCallbacks.RABBITMQ,
+                NotificationMethod.TEST,
+                NotificationMethod.EMAIL,
+                NotificationMethod.SLACK,
+                NotificationMethod.RABBITMQ,
             ],
             "params": {
                 "test": None,
@@ -73,7 +73,7 @@ TASK_METADATA = {
         "description": "A generic task that can be used to run any command.",
         "notification": {
             "methods": [
-                NotificationCallbacks.TEST,
+                NotificationMethod.TEST,
             ],
             "params": {
                 "test": None,

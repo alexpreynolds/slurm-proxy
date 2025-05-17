@@ -6,7 +6,6 @@ import pika
 import base64
 import smtplib
 from enum import Enum
-from flask import Flask
 from functools import partial
 from email.mime.text import MIMEText
 from email.message import EmailMessage
@@ -15,23 +14,6 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-from app.constants import (
-    APP_NAME,
-    NOTIFICATIONS_SMTP_SERVER,
-    NOTIFICATIONS_SMTP_PORT,
-    NOTIFICATIONS_SMTP_USERNAME,
-    NOTIFICATIONS_SMTP_PASSWORD,
-    NOTIFICATIONS_GMAIL_CREDENTIALS_PATH,
-    NOTIFICATIONS_RABBITMQ_HOST,
-    NOTIFICATIONS_RABBITMQ_PORT,
-    NOTIFICATIONS_RABBITMQ_USERNAME,
-    NOTIFICATIONS_RABBITMQ_PASSWORD,
-    NOTIFICATIONS_RABBITMQ_PATH,
-    NOTIFICATIONS_SLACK_BOT_TOKEN,
-    NOTIFICATIONS_SLACK_CHANNEL,
-)
-
-app = Flask(APP_NAME)
 
 
 class NotificationMethod(Enum):
@@ -68,6 +50,10 @@ class NotificationCallback:
         Returns:
             bool: True if valid, False otherwise.
         """
+        from app.helpers import (
+            get_slurm_proxy_app,
+        )
+        app = get_slurm_proxy_app()
         email_pattern = r"^\S+@\S+\.\S+$"
         if not re.match(email_pattern, sender):
             app.logger.error(
@@ -98,10 +84,20 @@ class NotificationCallback:
             subject (str): The subject of the email.
             body (str): The body of the email.
         """
+        from app.helpers import (
+            get_slurm_proxy_app,
+        )
+        from app.constants import (
+            NOTIFICATIONS_SMTP_SERVER,
+            NOTIFICATIONS_SMTP_PORT,
+            NOTIFICATIONS_SMTP_USERNAME,
+            NOTIFICATIONS_SMTP_PASSWORD,
+        )
+        app = get_slurm_proxy_app()
         app.logger.debug(
             f"notify_via_email | Sending email from {sender} to {recipient} with subject '{subject}' and body '{body}'"
         )
-        if not NotificationCallbacks.validate_email_parameters(
+        if not NotificationCallback.validate_email_parameters(
             sender, recipient, subject, body
         ):
             app.logger.error(
@@ -134,10 +130,17 @@ class NotificationCallback:
             subject (str): The subject of the email.
             body (str): The body of the email.
         """
+        from app.constants import (
+            NOTIFICATIONS_GMAIL_CREDENTIALS_PATH,
+        )
+        from app.helpers import (
+            get_slurm_proxy_app,
+        )
+        app = get_slurm_proxy_app()
         app.logger.debug(
             f"Sending email from {sender} to {recipient} with subject '{subject}' and body '{body}'"
         )
-        if not NotificationCallbacks.validate_email_parameters(
+        if not NotificationCallback.validate_email_parameters(
             sender, recipient, subject, body
         ):
             app.logger.error(
@@ -184,6 +187,17 @@ class NotificationCallback:
             routing_key (str): The routing key for the message.
             body (str): The body of the message.
         """
+        from app.constants import (
+            NOTIFICATIONS_RABBITMQ_HOST,
+            NOTIFICATIONS_RABBITMQ_PORT,
+            NOTIFICATIONS_RABBITMQ_USERNAME,
+            NOTIFICATIONS_RABBITMQ_PASSWORD,
+            NOTIFICATIONS_RABBITMQ_PATH,
+        )
+        from app.helpers import (
+            get_slurm_proxy_app,
+        )
+        app = get_slurm_proxy_app()
         try:
             credentials = pika.PlainCredentials(
                 NOTIFICATIONS_RABBITMQ_USERNAME, NOTIFICATIONS_RABBITMQ_PASSWORD
@@ -219,13 +233,21 @@ class NotificationCallback:
         """
         Sends a notification to a Slack channel.
         """
+        from app.constants import (
+            NOTIFICATIONS_SLACK_BOT_TOKEN,
+            NOTIFICATIONS_SLACK_CHANNEL,
+        )
+        from app.helpers import (
+            get_slurm_proxy_app,
+        )
+        app = get_slurm_proxy_app()
         if not msg:
-            print(" * Error: Empty Slack message", file=sys.stderr)
+            app.logger.error("Error: Empty Slack message")
             return
         try:
             client = WebClient(token=NOTIFICATIONS_SLACK_BOT_TOKEN)
             channel = NOTIFICATIONS_SLACK_CHANNEL if not channel else channel
-            response = client.chat_postMessage(channel, text=msg)
+            response = client.chat_postMessage(channel=channel, text=msg)
             app.logger.debug(
                 f"notify_via_slack | Slack message sent successfully: {response['message']['text']}"
             )

@@ -1,19 +1,14 @@
 # -*- coding: utf-8 -*-
 
-import sys
 import pymongo
 import paramiko
 from flask import (
     Blueprint,
     request,
     Response,
-    Flask,
 )
-from app.helpers import (
-    stream_json_response,
-)
+from app import helpers
 from app.constants import (
-    APP_NAME,
     SLURM_STATE,
     SLURM_STATE_UNKNOWN,
     SLURM_STATE_END_STATES,
@@ -27,10 +22,8 @@ from app.task_notification import NotificationMethod
 from app.task_ssh_client import ssh_client_connection_singleton
 from app.task_mongodb_client import mongodb_connection_singleton
 
-
 ssh_connection = ssh_client_connection_singleton
 mongodb_connection = mongodb_connection_singleton
-app = Flask(APP_NAME)
 
 SLURM_STATES_ALLOWED = SLURM_STATE.keys()
 SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.REST
@@ -49,15 +42,19 @@ def post() -> Response:
     POST request to add a new job to the monitor database.
     The request body should contain a JSON object with the job information.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     request_info = request.get_json(force=True)
     job = request_info.get("job")
     if not job:
         app.logger.error("No job provided to be monitored")
         return {"error": "No job provided to be monitored"}, 400
     response = (
-        stream_json_response(job, 200)
+        helpers.stream_json_response(job, 200)
         if monitor_new_slurm_job(job)
-        else stream_json_response({"error": "Failed to monitor job"}, 400)
+        else helpers.stream_json_response({"error": "Failed to monitor job"}, 400)
     )
     return response
 
@@ -76,6 +73,10 @@ def get_job_metadata_by_slurm_job_id(slurm_job_id: str) -> Response:
     Returns:
         Response: A Flask Response object containing the job metadata in JSON format.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     slurm_username = request.args.get("username")
     if not slurm_username:
         slurm_username = SLURM_REST_GENERIC_USERNAME
@@ -87,9 +88,7 @@ def get_job_metadata_by_slurm_job_id(slurm_job_id: str) -> Response:
     # if not slurm_job_status_metadata:
     # job not found in SLURM scheduler for specified ID and username
     # return {"error": "Job information not found"}, 404
-    monitor_db_job_metadata = get_job_metadata_from_monitor_db_by_slurm_job_id(
-        slurm_job_id
-    )
+    monitor_db_job_metadata = get_job_metadata_from_monitor_db(slurm_job_id)
     if not slurm_job_status_metadata and not monitor_db_job_metadata:
         app.logger.error(
             f"get_job_metadata_by_slurm_job_id | Job {slurm_job_id} not found in SLURM scheduler or monitor database"
@@ -113,7 +112,7 @@ def get_job_metadata_by_slurm_job_id(slurm_job_id: str) -> Response:
         },
         "monitor": monitor_db_job_metadata,
     }
-    response = stream_json_response(response_data, 200)
+    response = helpers.stream_json_response(response_data, 200)
     return response
 
 
@@ -129,6 +128,10 @@ def get_job_metadata_by_task_uuid(task_uuid: str) -> Response:
     Returns:
         Response: A Flask Response object containing the job metadata in JSON format.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     if not task_uuid:
         app.logger.error("get_job_metadata_by_task_uuid | No task UUID provided")
         return {"error": "No task UUID provided"}, 400
@@ -169,7 +172,7 @@ def get_job_metadata_by_task_uuid(task_uuid: str) -> Response:
         },
         "monitor": monitor_db_job_metadata,
     }
-    response = stream_json_response(response_data, 200)
+    response = stream_json_response(response_data, 200)    
     return response
 
 
@@ -187,6 +190,10 @@ def get_by_slurm_job_state(slurm_job_state: str) -> Response:
     Returns:
         Response: A Flask Response object containing the job metadata in JSON format.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     if slurm_job_state not in SLURM_STATES_ALLOWED:
         app.logger.error(
             f"get_by_slurm_job_state | Invalid SLURM job state: {slurm_job_state}"
@@ -194,7 +201,7 @@ def get_by_slurm_job_state(slurm_job_state: str) -> Response:
         return {"error": "Invalid state key"}, 400
     # also query the database for jobs with the given state, for comparison
     jobs = get_slurm_jobs_metadata_by_slurm_job_state(slurm_job_state)
-    response = stream_json_response(jobs, 200)
+    response = helpers.stream_json_response(jobs, 200)
     return response
 
 
@@ -212,10 +219,14 @@ def delete_by_slurm_job_id(slurm_job_id: int) -> Response:
     Returns:
         Response: A Flask Response object indicating the success or failure of the operation.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     response = None
     # check if job was already in the monitor database
     slurm_job_id = int(slurm_job_id)
-    job_metadata = get_job_metadata_from_monitor_db_by_slurm_job_id(slurm_job_id)
+    job_metadata = get_job_metadata_from_monitor_db(slurm_job_id)
     if job_metadata:
         try:
             # delete the job from SLURM queue
@@ -234,7 +245,7 @@ def delete_by_slurm_job_id(slurm_job_id: int) -> Response:
                 app.logger.error(
                     f'delete_by_slurm_job_id | Failed to delete job from SLURM: {stderr.read().decode("utf-8")}'
                 )
-                response = stream_json_response(
+                response = helpers.stream_json_response(
                     {"error": "Job could not be deleted from SLURM scheduler"}, 400
                 )
                 return response
@@ -242,27 +253,27 @@ def delete_by_slurm_job_id(slurm_job_id: int) -> Response:
             app.logger.error(
                 f"delete_by_slurm_job_id | Failed to delete job from SLURM via SSH client: {err}"
             )
-            response = stream_json_response(
+            response = helpers.stream_json_response(
                 {"error": f"Failed to delete job from SLURM: {err}"}, 500
             )
             return response
         except Exception as err:
             app.logger.error(f"delete_by_slurm_job_id | Unexpected error: {err}")
-            response = stream_json_response({"error": f"Unexpected error: {err}"}, 500)
+            response = helpers.stream_json_response({"error": f"Unexpected error: {err}"}, 500)
             return response
     else:
         # job not found in the database
         app.logger.error(
             f"delete_by_slurm_job_id | Job {slurm_job_id} not found in monitor database"
         )
-        response = stream_json_response(
+        response = helpers.stream_json_response(
             {"error": f"Job not found in monitor database"}, 404
         )
         return response
     # delete the job from the database
     deleted_job = remove_and_return_job_from_monitor_db_by_slurm_job_id(slurm_job_id)
     # return the job object
-    response = stream_json_response(deleted_job, 200)
+    response = helpers.stream_json_response(deleted_job, 200)
     return response
 
 
@@ -282,6 +293,10 @@ def monitor_new_slurm_job(job: dict) -> bool:
     Returns:
         bool: True if the job was successfully monitored, False otherwise.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     try:
         slurm_job_id = int(job["slurm_job_id"])
     except TypeError as err:
@@ -332,6 +347,10 @@ def add_job_to_monitor_db(
     Returns:
         bool: True if the job was successfully added to the monitor database, False otherwise.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     if slurm_job_state == SLURM_STATE_UNKNOWN:
         current_slurm_job_metadata = get_current_slurm_job_metadata_by_slurm_job_id(
             slurm_job_id,
@@ -358,7 +377,7 @@ def add_job_to_monitor_db(
         return False
 
 
-def get_job_metadata_from_monitor_db_by_slurm_job_id(slurm_job_id: int) -> dict:
+def get_job_metadata_from_monitor_db(slurm_job_id: int) -> dict:
     """
     Get job metadata from the monitor database using the SLURM job ID.
 
@@ -368,6 +387,10 @@ def get_job_metadata_from_monitor_db_by_slurm_job_id(slurm_job_id: int) -> dict:
     Returns:
         dict: A dictionary containing the job metadata, or None if the job was not found.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     try:
         jobs_coll = mongodb_connection.get_monitor_jobs_collection()
         result = jobs_coll.find_one({"slurm_job_id": slurm_job_id})
@@ -382,7 +405,7 @@ def get_job_metadata_from_monitor_db_by_slurm_job_id(slurm_job_id: int) -> dict:
             return None
     except pymongo.errors.PyMongoError as err:
         app.logger.error(
-            f"get_job_metadata_from_monitor_db_by_slurm_job_id | Error retrieving job information from monitor database: {err}"
+            f"get_job_metadata_from_monitor_db | Error retrieving job information from monitor database: {err}"
         )
         return None
 
@@ -397,6 +420,10 @@ def get_job_metadata_from_monitor_db_by_task_uuid(task_uuid: int) -> dict:
     Returns:
         dict: A dictionary containing the job metadata, or None if the job was not found.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     try:
         jobs_coll = mongodb_connection.get_monitor_jobs_collection()
         result = jobs_coll.find_one({"task.uuid": task_uuid})
@@ -429,6 +456,10 @@ def update_job_state_in_monitor_db(slurm_job_id: int, new_slurm_job_state: str) 
     Returns:
         bool: True if the job state was successfully updated, False otherwise.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     try:
         jobs_coll = mongodb_connection.get_monitor_jobs_collection()
         result = jobs_coll.update_one(
@@ -455,6 +486,10 @@ def remove_job_from_monitor_db_by_slurm_job_id(slurm_job_id: int) -> bool:
     Returns:
         bool: True if the job was successfully removed, False otherwise.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     try:
         jobs_coll = mongodb_connection.get_monitor_jobs_collection()
         result = jobs_coll.delete_one({"slurm_job_id": slurm_job_id})
@@ -478,6 +513,10 @@ def remove_and_return_job_from_monitor_db_by_slurm_job_id(slurm_job_id: int) -> 
     Returns:
         dict: A dictionary containing the job metadata, or None if the job was not found.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     try:
         jobs_coll = mongodb_connection.get_monitor_jobs_collection()
         result = jobs_coll.find_one_and_delete({"slurm_job_id": slurm_job_id})
@@ -505,6 +544,10 @@ def get_current_slurm_job_metadata_by_slurm_job_id(
 def get_current_slurm_job_metadata_by_slurm_job_id_via_rest(
     slurm_job_id: int, slurm_username: str
 ) -> dict:
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     if not slurm_job_id:
         return None
     if not slurm_username:
@@ -573,6 +616,10 @@ def get_current_slurm_job_metadata_by_slurm_job_id_via_ssh(
     Returns:
         dict: A dictionary containing the job metadata, or None if the job was not found.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     if not slurm_job_id:
         return None
     # test case
@@ -641,6 +688,10 @@ def get_slurm_jobs_metadata_by_slurm_job_state(slurm_job_state: str) -> dict:
     Returns:
         dict: A dictionary containing the job metadata for the given state.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     if not slurm_job_state:
         return None
     cmd = " ".join(
@@ -690,6 +741,10 @@ def poll_slurm_jobs() -> None:
     the job status if there are any changes. If a job is marked as finished, a state
     change event is triggered.
     """
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
     # app.logger.debug("poll_slurm_jobs | Polling SLURM jobs...")
     try:
         jobs_coll = mongodb_connection.get_monitor_jobs_collection()
@@ -744,9 +799,17 @@ def process_job_state_change(
         old_slurm_job_state (str): The old SLURM job state.
         new_slurm_job_state (str): The new SLURM job state.
     """
-    # app.logger.debug(
-    #     f"process_job_state_change | Processing job state change: {slurm_job_id}: {old_slurm_job_state} -> {new_slurm_job_state}"
+    # print(
+    #     f" * Processing job state change: {slurm_job_id}: {old_slurm_job_state} -> {new_slurm_job_state}",
+    #     file=sys.stderr
     # )
+    from app.helpers import (
+        get_slurm_proxy_app,
+    )
+    app = get_slurm_proxy_app()
+    app.logger.debug(
+        f"process_job_state_change | Processing job state change: {slurm_job_id}: {old_slurm_job_state} -> {new_slurm_job_state}"
+    )
     if new_slurm_job_state in SLURM_STATE_END_STATES:
         # app.logger.debug(f'process_job_state_change | Sending notification message for job {slurm_job_id}')
         try:

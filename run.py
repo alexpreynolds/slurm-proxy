@@ -12,9 +12,9 @@ from app.constants import (
     APP_USE_RELOADER,
 )
 
-from app import create_app
+from app import slurm_proxy_app
 
-app = create_app()
+app = slurm_proxy_app.SlurmProxyApp.app() # singleton
 
 app.run(
     debug=APP_DEBUG_MODE,

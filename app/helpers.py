@@ -6,16 +6,22 @@ from flask import (
     Response,
     json,
     stream_with_context,
-    Flask,
 )
 from app.constants import (
-    APP_NAME,
     MONGODB_URI,
 )
 from app.task_mongodb_client import MongoDBConnection
 
 mongodb_connection = MongoDBConnection()
-app = Flask(APP_NAME)
+
+
+def get_slurm_proxy_app():
+    """
+    Get the SLURM proxy application singleton instance. Useful for logging.
+    """
+    from app import slurm_proxy_app
+    slurm_proxy_app_singleton = slurm_proxy_app.SlurmProxyApp.app()
+    return slurm_proxy_app_singleton
 
 
 def ping_mongodb_client(
@@ -34,6 +40,7 @@ def ping_mongodb_client(
     Raises:
         Exception: If the MongoDB client cannot be pinged.
     """
+    app = get_slurm_proxy_app()
     try:
         client.admin.command("ping")
         app.logger.info(f"MongoDB running on {uri}")

@@ -5,14 +5,13 @@ from flask import (
     Blueprint,
     request,
     Response,
-    Flask,
 )
 from app.helpers import (
     stream_json_response,
     get_dict_from_streamed_json_response,
+    get_slurm_proxy_app,
 )
 from app.constants import (
-    APP_NAME,
     TASK_METADATA,
     BAD_SLURM_JOB_ID,
     SLURM_STATE_UNKNOWN,
@@ -29,7 +28,6 @@ ssh_connection = ssh_client_connection_singleton
 SLURM_COMMUNICATION_METHOD = SlurmCommunicationMethods.REST
 
 task_submission = Blueprint("task_submission", __name__)
-app = Flask(APP_NAME)
 
 """
 This module defines a Flask blueprint for task submission. 
@@ -48,6 +46,7 @@ def post() -> Response:
     This function receives a JSON object containing task information,
     validates the task, and submits it to the SLURM scheduler.
     """
+    app = get_slurm_proxy_app()
     request_info = request.get_json(force=True)
     if not request_info:
         app.logger.error(f"No JSON data received for job submission")
@@ -98,6 +97,7 @@ def submit_slurm_job(task: dict, submit_method: str) -> int:
         int: The job ID of the submitted task, or BAD_SLURM_JOB_ID if the submission
             failed.
     """
+    app = get_slurm_proxy_app()
     if submit_method == SlurmCommunicationMethods.SSH:
         job_id = submit_slurm_job_via_ssh(task)
         return job_id
@@ -123,6 +123,7 @@ def define_sbatch_cmd_for_task_via_ssh(task: dict) -> str:
     Returns:
         str: The full sbatch command to be executed.
     """
+    # app = get_slurm_proxy_app()
     cmd_comps = []
     # construct the command to create the directories holding the input, output, and error files
     dir_comps = task["dirs"]
@@ -178,6 +179,7 @@ def define_task_cmd(task_name: str, task_cmd: str, additional_task_params: list)
     Returns:
         str: The full command for the task, or None if the task is not defined.
     """
+    app = get_slurm_proxy_app()
     if task_name not in TASK_METADATA:
         app.logger.error(f"Task {task_name} is invalid")
         return None
@@ -208,6 +210,7 @@ def submit_slurm_job_via_ssh(task: dict) -> int:
         int: The job ID of the submitted task, or BAD_SLURM_JOB_ID if the submission
             failed.
     """
+    app = get_slurm_proxy_app()
     cmd = define_sbatch_cmd_for_task_via_ssh(task)
     if not cmd:
         # print(" * Failed to define sbatch command; validate task parameters", file=sys.stderr)
@@ -233,16 +236,13 @@ def submit_slurm_job_via_rest(task: dict) -> int:
     """
     Send the job to the SLURM scheduler via RESTful request.
 
-    This function tests if the task UUID is unique. If unique, this submits a 
-    preliminary job to the SLURM scheduler to generate directories for input, 
-    output, and error files. 
-    
-    The job id that results is used as a dependency for the actual ("main") job
-    that follows.
+    This function submits a preliminary job to the SLURM scheduler using a RESTful
+    request, which generates directories for input, output, and error files. The
+    job id that results is used as a dependency for the actual (main) job.
 
     This function then constructs the equivalent sbatch command using the
     parameters provided in the task dictionary and sends it to the SLURM
-    scheduler via REST API. It is run only if the preliminary job is successful.
+    scheduler via REST API.
 
     Args:
         task (dict): The task dictionary containing information about the task
@@ -253,6 +253,7 @@ def submit_slurm_job_via_rest(task: dict) -> int:
             failed.
     """
     from app.task_slurm_rest import submit_job_via_params
+    app = get_slurm_proxy_app()
 
     job_metadata = get_job_metadata_from_monitor_db_by_task_uuid(task["uuid"])
     if job_metadata:
@@ -260,7 +261,7 @@ def submit_slurm_job_via_rest(task: dict) -> int:
             f"Task UUID {task['uuid']} already exists in monitor database - {job_metadata}"
         )
         return BAD_SLURM_JOB_ID
-    
+
     preliminary_payload = get_preliminary_slurm_rest_payload_for_task(task)
     if not preliminary_payload:
         # print(" * Failed to define preliminary REST payload for submission; validate task parameters", file=sys.stderr)
@@ -327,6 +328,7 @@ def get_main_slurm_rest_payload_for_task(task: dict, preliminary_job_id: int) ->
     Returns:
         dict: The payload for the SLURM RESTful request.
     """
+    app = get_slurm_proxy_app()
     try:
         dir_comps = task["dirs"]
         # parent_dir = dir_comps["parent"]
@@ -373,7 +375,7 @@ def get_preliminary_slurm_rest_payload_for_task(task: dict) -> dict:
     Returns:
         dict: The payload for the SLURM RESTful request.
     """
-
+    app = get_slurm_proxy_app()
     try:
         dir_comps = task["dirs"]
         parent_dir = dir_comps["parent"]

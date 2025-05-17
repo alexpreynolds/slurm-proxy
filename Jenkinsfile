@@ -23,7 +23,8 @@ node {
       }
 
       stage('Test') {
-        echo 'Stub for tests'
+        sh 'pytest -s --disable-warnings --tb=short tests/test_app_logging.py'
+        sh 'pytest -s --disable-warnings --tb=short tests/test_task_submission_rest.py'
       }
 
       stage('Push Image') {

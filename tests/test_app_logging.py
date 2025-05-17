@@ -6,7 +6,9 @@ file = Path(__file__).resolve()
 parent, root = file.parent, file.parents[1]
 sys.path.append(str(root))
 
-import app
+from app.helpers import (
+    get_slurm_proxy_app,
+)
 
 class TestLogConfiguration(unittest.TestCase):
     
@@ -14,7 +16,7 @@ class TestLogConfiguration(unittest.TestCase):
         """
         Verify log for INFO level
         """
-        self.app = app.create_app()
+        self.app = get_slurm_proxy_app()
         self.client = self.app.test_client
 
         with self.assertLogs() as log:

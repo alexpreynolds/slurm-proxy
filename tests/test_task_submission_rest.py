@@ -2,7 +2,6 @@ import copy
 import uuid
 
 import unittest
-from flask import Flask
 
 import sys
 from pathlib import Path
@@ -10,7 +9,11 @@ from pathlib import Path
 file = Path(__file__).resolve()
 parent, root = file.parent, file.parents[1]
 sys.path.append(str(root))
+
 from app.task_submission import task_submission
+from app.helpers import (
+    get_slurm_proxy_app,
+)
 
 test_data_base = {
     "task": {
@@ -45,8 +48,7 @@ test_data_base = {
 
 class TestTaskSubmission(unittest.TestCase):
     def setUp(self):
-        self.app = Flask(__name__)
-        self.app.register_blueprint(task_submission, url_prefix="/")
+        self.app = get_slurm_proxy_app()
         self.client = self.app.test_client()
 
     def tearDown(self):
@@ -54,18 +56,18 @@ class TestTaskSubmission(unittest.TestCase):
 
     def test_index_with_duplicate_uuid(self):
         test_data_existing_uuid = copy.deepcopy(test_data_base)
-        response = self.client.post("/", json=test_data_existing_uuid)
+        response = self.client.post("/submit", json=test_data_existing_uuid)
         self.assertEqual(response.status_code, 400)
 
     def test_index_with_unique_uuid(self):
         test_data_with_unique_uuid = copy.deepcopy(test_data_base)
         test_data_with_unique_uuid["task"]["uuid"] = uuid.uuid4()
-        response = self.client.post("/", json=test_data_with_unique_uuid)
+        response = self.client.post("/submit", json=test_data_with_unique_uuid)
         self.assertEqual(response.status_code, 200)
 
     def test_index_without_data(self):
         # Send a POST request without any JSON data
-        response = self.client.post("/")
+        response = self.client.post("/submit")
         self.assertEqual(response.status_code, 400)
 
 

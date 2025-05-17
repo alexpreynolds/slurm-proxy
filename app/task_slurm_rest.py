@@ -9,13 +9,12 @@ from flask import (
     Blueprint,
     Response,
     request,
-    Flask,
 )
 from app.helpers import (
     stream_json_response,
+    get_slurm_proxy_app,
 )
 from app.constants import (
-    APP_NAME,
     SLURM_REST_SLURM_ENDPOINT_URL,
     SLURM_REST_SLURMDB_ENDPOINT_URL,
     SLURM_REST_JWT_EXPIRATION_TIME,
@@ -34,7 +33,6 @@ https://slurm.schedmd.com/SLUG23/REST-API-SLUG23.pdf
 """
 
 ssh_connection = ssh_client_connection_singleton
-app = Flask(APP_NAME)
 
 
 class QueryParams(TypedDict, total=False):
@@ -132,6 +130,7 @@ def get_job_info_for_job_id_via_params(job_id: int, username: str) -> Response:
     ref. https://slurm.schedmd.com/rest_api.html#slurmdbV0042GetJob (request)
     ref. https://slurm.schedmd.com/rest_api.html#v0.0.42_openapi_slurmdbd_jobs_resp (response)
     """
+    app = get_slurm_proxy_app()
     if not username:
         username = SLURM_REST_GENERIC_USERNAME
 
@@ -247,6 +246,7 @@ def run_query(
     Returns:
         Response: The response from the SLURM REST API.
     """
+    app = get_slurm_proxy_app()
     slurm_rest_auth_token = get_slurm_rest_jwt_token_for_username(username)
     if not slurm_rest_auth_token:
         # print(" * Error: Failed to retrieve SLURM REST auth token", file=sys.stderr)
@@ -275,6 +275,7 @@ def run_query(
 
 
 def get_slurm_rest_jwt_private_key_via_env() -> str:
+    app = get_slurm_proxy_app()
     slurm_private_key = os.environ.get("SLURM_JWT_HS256_KEY_BASE64")
     if not slurm_private_key:
         # print(" * Error: SLURM_JWT_HS256_KEY_BASE64 environment variable not set", file=sys.stderr)
@@ -288,6 +289,7 @@ def get_slurm_rest_jwt_private_key_via_env() -> str:
 def get_slurm_rest_jwt_token_for_username(username: str) -> str:
     # if not username or username == SLURM_REST_GENERIC_USERNAME:
     #     return None
+    app = get_slurm_proxy_app()
     if not username:
         app.logger.warning(
             f"get_slurm_rest_jwt_token_for_username | Username not provided"
@@ -328,6 +330,7 @@ def get_slurm_rest_jwt_token_cmd(username: str) -> str:
 
 
 def get_slurm_rest_jwt_token_via_cli(username: str) -> str:
+    app = get_slurm_proxy_app()
     cmd = get_slurm_rest_jwt_token_cmd(username)
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
@@ -339,6 +342,7 @@ def get_slurm_rest_jwt_token_via_cli(username: str) -> str:
 
 
 def get_slurm_rest_jwt_token_via_ssh(username: str) -> str:
+    app = get_slurm_proxy_app()
     cmd = get_slurm_rest_jwt_token_cmd(username)
     app.logger.debug(f"get_slurm_rest_jwt_token_via_ssh | Executing command '{cmd}'")
     (stdin, stdout, stderr) = ssh_connection.ssh_client_exec(cmd)
@@ -388,6 +392,7 @@ def query_slurm_endpoint_via_ssh(
     endpoint_method: str,
     **kwargs: Unpack[QueryParams],
 ) -> str:
+    app = get_slurm_proxy_app()
     query_url = get_slurm_rest_query(endpoint_url, endpoint_key, **kwargs)
     cmd = f"curl -vs -k -vvvv -H X-SLURM-USER-TOKEN:{slurm_rest_auth_token} -X {endpoint_method} '{query_url}'"
     (stdin, stdout, stderr) = ssh_connection.ssh_client_exec(cmd)
@@ -406,6 +411,7 @@ def query_slurm_get_endpoint_via_requests(
     endpoint_method: str,
     **kwargs: Unpack[QueryParams],
 ) -> str:
+    app = get_slurm_proxy_app()
     query_url = get_slurm_rest_query(endpoint_url, endpoint_key, **kwargs)
     headers = {
         "X-SLURM-USER-TOKEN": slurm_rest_auth_token,
@@ -426,6 +432,7 @@ def query_slurm_post_endpoint_via_requests(
     endpoint_method: str,
     **kwargs: Unpack[QueryParams],
 ) -> str:
+    app = get_slurm_proxy_app()
     query_url = f"{endpoint_url}/{endpoint_key}/"
     headers = {
         "X-SLURM-USER-TOKEN": slurm_rest_auth_token,

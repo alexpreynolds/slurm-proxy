@@ -1,19 +1,14 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
 import paramiko
-from flask import Flask
 from socket import gaierror
 from app.constants import (
-    APP_NAME,
     SSH_HOSTNAME,
     SSH_USERNAME,
     SSH_PRIVATE_KEY,
 )
 from threading import Lock
-
-app = Flask(APP_NAME)
 
 
 class SSHClientConnection:
@@ -62,6 +57,8 @@ class SSHClientConnection:
         Returns:
             tuple: A tuple containing the output and error streams of the executed command.
         """
+        from app import slurm_proxy_app
+        app = slurm_proxy_app.SlurmProxyApp.app()
         try:
             if not self._ssh_client:
                 self._ssh_client = self.init_ssh_client()
@@ -86,19 +83,18 @@ class SSHClientConnection:
             self.report_ssh_environment()
 
     def report_ssh_environment(self):
-        print(
-            f" * SSH_HOSTNAME={os.environ.get('SSH_HOSTNAME', SSH_HOSTNAME)}",
-            file=sys.stderr,
+        from app import slurm_proxy_app
+        app = slurm_proxy_app.SlurmProxyApp.app()
+        app.logger.error(
+            f"SSH_HOSTNAME={os.environ.get('SSH_HOSTNAME', SSH_HOSTNAME)}",
         )
-        print(
-            f" * SSH_USERNAME={os.environ.get('SSH_USERNAME', SSH_USERNAME)}",
-            file=sys.stderr,
+        app.logger.error(
+            f"SSH_USERNAME={os.environ.get('SSH_USERNAME', SSH_USERNAME)}",
         )
-        print(
-            f" * SSH_PRIVATE_KEY={os.environ.get('SSH_PRIVATE_KEY', SSH_PRIVATE_KEY)}",
-            file=sys.stderr,
+        app.logger.error(
+            f"SSH_PRIVATE_KEY={os.environ.get('SSH_PRIVATE_KEY', SSH_PRIVATE_KEY)}",
         )
-        print(f" * SSH_AUTH_SOCK={os.environ.get('SSH_AUTH_SOCK')}", file=sys.stderr)
+        app.logger.error(f"SSH_AUTH_SOCK={os.environ.get('SSH_AUTH_SOCK')}")
 
 
 ssh_client_connection_singleton = SSHClientConnection()

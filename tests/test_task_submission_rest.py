@@ -33,12 +33,23 @@ test_data_base = {
             "partition": "hpcz-test",
             "time": 5,
         },
-        "name": "echo_hello_world",
+        "name": "generic",
         "cmd": "echo",
         "params": [
             "-e",
             "\"hello, world! (ran $SLURM_JOB_ID for $SLURM_JOB_USER at `date`)\"",
         ],
+        "notification": {
+            "methods": ["email"],
+            "params": {
+                "email": {
+                    "sender": "anyone@example.com",
+                    "recipient": "anyone@example.com",
+                    "subject": "Generic task completed",
+                    "body": "Generic task has completed successfully.",
+                }
+            },
+        },
         "uuid": "123e4567-e89b-12d3-a456-426614174000",
         "username": "areynolds",
         "cwd": "/home/areynolds",

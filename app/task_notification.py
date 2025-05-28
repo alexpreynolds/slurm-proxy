@@ -6,7 +6,6 @@ import pika
 import base64
 import smtplib
 from enum import Enum
-from functools import partial
 from email.mime.text import MIMEText
 from email.message import EmailMessage
 from google.auth import load_credentials_from_file
@@ -14,31 +13,72 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from abc import ABC, abstractmethod
 
 
 class NotificationMethod(Enum):
-    EMAIL = partial(
-        lambda sender, recipient, subject, body: NotificationCallback.notify_via_email(
-            sender, recipient, subject, body
-        )
-    )
-    GMAIL = partial(
-        lambda sender, recipient, subject, body: NotificationCallback.notify_via_gmail(
-            sender, recipient, subject, body
-        )
-    )
-    RABBITMQ = partial(
-        lambda queue, exchange, routing_key, body: NotificationCallback.notify_via_rabbitmq(
-            queue, exchange, routing_key, body
-        )
-    )
-    SLACK = partial(
-        lambda msg, channel: NotificationCallback.notify_via_slack(msg, channel)
-    )
-    TEST = partial(lambda msg: NotificationCallback.notify_via_test(msg))
+    EMAIL = "email"
+    GMAIL = "gmail"
+    RABBITMQ = "rabbitmq"
+    SLACK = "slack"
+    TEST = "test"
 
 
-class NotificationCallback:
+class NotificationCallback(ABC):
+    @abstractmethod
+    def notify(self, *args, **kwargs):
+        """
+        Abstract method to send a notification.
+        This method should be implemented by subclasses.
+        """
+        pass
+
+    
+class NotificationCallbackFactory:
+    @staticmethod
+    def create_callback_for_method(method:NotificationMethod) -> NotificationCallback:
+        if not method:
+            raise ValueError("Must specify notification method!")
+        if method == NotificationMethod.EMAIL.value:
+            return EmailNotificationCallback()
+        elif method == NotificationMethod.GMAIL.value:
+            return GmailNotificationCallback()
+        elif method == NotificationMethod.RABBITMQ.value:
+            return RabbitMQNotificationCallback()
+        elif method == NotificationMethod.SLACK.value:
+            return SlackNotificationCallback()
+        elif method == NotificationMethod.TEST.value:
+            return TestNotificationCallback()
+        else:
+            raise ValueError("Unknown notification method!")
+
+    
+class EmailNotificationCallback(NotificationCallback):
+    def notify(self, sender, recipient, subject, body):
+        NotificationMethodCallback.notify_via_email(sender, recipient, subject, body)
+
+
+class GmailNotificationCallback(NotificationCallback):
+    def notify(self, sender, recipient, subject, body):
+        NotificationMethodCallback.notify_via_gmail(sender, recipient, subject, body)
+
+
+class RabbitMQNotificationCallback(NotificationCallback):
+    def notify(self, queue, exchange, routing_key, body):
+        NotificationMethodCallback.notify_via_rabbitmq(queue, exchange, routing_key, body)
+
+
+class SlackNotificationCallback(NotificationCallback):
+    def notify(self, msg, channel):
+        NotificationMethodCallback.notify_via_slack(msg, channel)
+
+
+class TestNotificationCallback(NotificationCallback):
+    def notify(self, msg):
+        NotificationMethodCallback.notify_via_test(msg)
+
+
+class NotificationMethodCallback:
     @staticmethod
     def validate_email_parameters(sender, recipient, subject, body):
         """
@@ -97,7 +137,7 @@ class NotificationCallback:
         app.logger.debug(
             f"notify_via_email | Sending email from {sender} to {recipient} with subject '{subject}' and body '{body}'"
         )
-        if not NotificationCallback.validate_email_parameters(
+        if not NotificationMethodCallback.validate_email_parameters(
             sender, recipient, subject, body
         ):
             app.logger.error(
@@ -140,7 +180,7 @@ class NotificationCallback:
         app.logger.debug(
             f"Sending email from {sender} to {recipient} with subject '{subject}' and body '{body}'"
         )
-        if not NotificationCallback.validate_email_parameters(
+        if not NotificationMethodCallback.validate_email_parameters(
             sender, recipient, subject, body
         ):
             app.logger.error(

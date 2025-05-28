@@ -6,12 +6,14 @@
   - [x] Replace SSH-based job submission process with RESTful call that targets specified end user and new cluster partition
     - [x] Preliminary job to create destination folders for output and error logs, before firing primary task
     - [x] Main job fired off after preliminary prep job is completed (use `job_id` as dependency)
-  - [ ] Run basic test with different users
+  - [ ] Run basic tests
     - [x] Test overall task submission against `areynolds`
     - [ ] Test overall task submission against another user account that can access the cluster
       - [x] Get `slurmapitest` account set up
       - [x] Launch job to target this account and verify output
       - [ ] Request the account is closed, if tests pass
+    - [x] Test generic task (simple, but arbitrary command and parameters)
+  - [x] Allow specification of notification methods passed in task, outside of `constants.TASK_METADATA`
 
 - [x] Task SLURM REST endpoints @alexpreynolds
   - [x] Test `slurm/jobs/` and `slurmdb/job/<job_id>/` endpoints

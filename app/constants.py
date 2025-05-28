@@ -38,17 +38,18 @@ send notifications about a completed task. This queue name should be specific to
 TASK_METADATA = {
     "echo_hello_world": {
         "cmd": "echo",
-        "default_params": [],
+        "default_params": ["-e", "\"hello, world! (sent job $SLURM_JOB_ID to $SLURM_JOB_USER at `date`)\""],
         "description": "Prints a generic hello world! message",
         "notification": {
             "methods": [
-                NotificationMethod.TEST,
-                NotificationMethod.EMAIL,
-                NotificationMethod.SLACK,
-                NotificationMethod.RABBITMQ,
+                NotificationMethod.TEST.value,
+                NotificationMethod.EMAIL.value,
+                NotificationMethod.GMAIL.value,
+                NotificationMethod.SLACK.value,
+                NotificationMethod.RABBITMQ.value,
             ],
             "params": {
-                "test": None,
+                "test": {},
                 "email": {
                     "sender": "areynolds@altius.org",
                     "recipient": "areynolds@altius.org",
@@ -68,15 +69,11 @@ TASK_METADATA = {
             },
         },
     },
-    "generic_task": {
-        "description": "A generic task that can be used to run any command.",
+    "generic": {
+        "description": "A generic task that can be used to run any command. No notification methods are specified.",
         "notification": {
-            "methods": [
-                NotificationMethod.TEST,
-            ],
-            "params": {
-                "test": None,
-            },
+            "methods": [],
+            "params": {},
         },
     }
 }
@@ -152,6 +149,14 @@ MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 MONGODB_MONITOR_DB = os.getenv("MONGODB_MONITOR_DB", "monitordb")
 MONGODB_TIMEOUT = os.getenv("MONGODB_TIMEOUT", 1000)  # in milliseconds
 MONGODB_MONITOR_JOBS_COLLECTION = os.getenv("MONGODB_MONITOR_JOBS_COLLECTION", "jobs")
+
+"""
+When searching for jobs in the MongoDB monitor collection, this is as far back
+as we go to look for jobs that were created. This is to prevent the monitor from
+searching through too many jobs that were created a long time ago, which may no 
+longer be relevant.
+"""
+MONGODB_MONITOR_JOB_CREATED_AT_MAX_AGE = os.environ.get("MONGODB_MONITOR_JOB_CREATED_AT_MAX_AGE", 60 * 60 * 24 * 14) # 14 days in seconds
 
 """
 How frequently to poll the SLURM scheduler for job status updates.

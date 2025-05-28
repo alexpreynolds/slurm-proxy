@@ -9,10 +9,37 @@ from flask import (
 )
 from app.constants import (
     MONGODB_URI,
+    MONGODB_MONITOR_JOB_CREATED_AT_MAX_AGE,
 )
 from app.task_mongodb_client import MongoDBConnection
+from bson import json_util
 
 mongodb_connection = MongoDBConnection()
+
+
+def get_current_datetime():
+    """
+    Get the current date and time in ISO format.
+    
+    Returns:
+        str: The current date and time in ISO format.
+    """
+    from datetime import (datetime, timezone)
+    return datetime.now(timezone.utc)
+
+
+def get_current_datetime_minus_interval(interval:int=MONGODB_MONITOR_JOB_CREATED_AT_MAX_AGE):
+    """
+    Get the current date and time minus a specified interval in seconds.
+
+    Args:
+        interval (int): The interval in seconds to subtract from the current time.
+
+    Returns:
+        datetime: The current date and time minus the specified interval.
+    """
+    from datetime import (datetime, timezone, timedelta)
+    return datetime.now(timezone.utc) - timedelta(seconds=interval)
 
 
 def get_slurm_proxy_app():
@@ -64,7 +91,7 @@ def stream_json_response(data: dict, status_code: int = 200) -> Response:
     """
 
     def generate():
-        yield json.dumps(data, indent=4)
+        yield json_util.dumps(data, indent=4, default=vars)
         yield "\n"
 
     response = Response(

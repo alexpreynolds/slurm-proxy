@@ -19,7 +19,7 @@ from app.constants import (
     SlurmCommunicationMethods,
 )
 from app.task_monitoring import (
-    get_job_metadata_from_monitor_db_by_task_uuid,
+    get_job_metadata_from_monitor_db_by_query,
     monitor_new_slurm_job,
 )
 from app.task_ssh_client import ssh_client_connection_singleton
@@ -264,7 +264,7 @@ def submit_slurm_job_via_rest(task: dict) -> Tuple[int, str]:
     from app.task_slurm_rest import submit_job_via_params
     app = get_slurm_proxy_app()
 
-    job_metadata = get_job_metadata_from_monitor_db_by_task_uuid(task["uuid"])
+    job_metadata = get_job_metadata_from_monitor_db_by_query({'task.uuid': task["uuid"]})
     if job_metadata:
         msg = f"Task UUID {task['uuid']} already exists in monitor database - {job_metadata}"
         app.logger.error(msg)

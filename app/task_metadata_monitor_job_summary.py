@@ -106,8 +106,8 @@ class MonitorJobSummary(object):
             "slurm_job_id": self.slurm_job_id,
             "slurm_job_state": self.slurm_job_state,
             "task": self.task,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at if self.updated_at else None,
         }
     
     def __repr__(self) -> str:

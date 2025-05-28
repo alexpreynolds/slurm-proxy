@@ -106,5 +106,5 @@ class SlurmJobSummary(object):
         Returns:
             str: String representation of the task job.
         """
-        return f"SlurmJob(slurm_job_id={self.job_id}, slurm_job_state={self.job_state}, username={self.username})"
+        return f"SlurmJob(job_id={self.job_id}, job_state={self.job_state}, username={self.username})"
     

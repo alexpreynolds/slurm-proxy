@@ -346,7 +346,7 @@ def get_main_slurm_rest_payload_for_task(task: dict, preliminary_job_id: int) ->
             "username": task["username"],
             "job": {
                 "script": slurm_cmd,
-                "environment": ["PATH=/bin/:/usr/bin/:/sbin/"],
+                "environment": [task["slurm"].get("environment", "PATH=/bin/:/usr/bin/:/sbin/")],
                 "current_working_directory": f"{task['cwd']}",
                 "name": f"hpc-proxy-{task['name']}-{task['uuid']}-main",
                 "partition": task["slurm"]["partition"],

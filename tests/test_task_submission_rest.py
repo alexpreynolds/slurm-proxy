@@ -32,6 +32,7 @@ test_data_base = {
             "output": "dt-slurm-proxy.hello_world.output.txt",
             "partition": "hpcz-test",
             "time": 5,
+            "environment": "PATH=/bin/:/usr/bin/:/sbin/",
         },
         "name": "generic",
         "cmd": "echo",
